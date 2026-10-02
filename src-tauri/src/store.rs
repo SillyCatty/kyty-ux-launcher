@@ -24,8 +24,13 @@ pub struct StoreData {
     pub repo: String,
     pub auto_check_updates: bool,
     pub setup_complete: bool,
+    /// A user-supplied tool that unpacks .pkg files. The launcher bundles no unpacking code.
+    pub converter_path: String,
+    pub converter_args: String,
     pub stats: HashMap<String, PlayStats>,
 }
+
+pub const DEFAULT_CONVERTER_ARGS: &str = "\"{pkg}\" \"{out}\"";
 
 impl Default for StoreData {
     fn default() -> Self {
@@ -34,6 +39,8 @@ impl Default for StoreData {
             repo: DEFAULT_REPO.into(),
             auto_check_updates: true,
             setup_complete: false,
+            converter_path: String::new(),
+            converter_args: DEFAULT_CONVERTER_ARGS.into(),
             stats: HashMap::new(),
         }
     }

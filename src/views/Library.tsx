@@ -5,7 +5,7 @@ import { formatDate, formatPlayTime } from "../lib/fields";
 import { backdropVariants, gridVariants, hoverLift, itemVariants, modalVariants, pageVariants, smooth, springBouncy, springSnappy, tap } from "../lib/motion";
 import { useApp } from "../store/app";
 import { Button, Select } from "../components/ui";
-import { IconFolder, IconGamepad, IconPlay, IconPlus, IconRefresh, IconSearch, IconStop, IconTrash, IconClose, IconSettings } from "../components/icons";
+import { IconFolder, IconGamepad, IconPackage, IconPlay, IconPlus, IconRefresh, IconSearch, IconStop, IconTrash, IconClose, IconSettings } from "../components/icons";
 
 type Sort = "name" | "recent" | "playtime";
 
@@ -164,7 +164,7 @@ function GameDetail({ game }: { game: Game }) {
 }
 
 function FolderMenu() {
-  const { original, openFolder, changeGameFolder, removeSavedGameFolder } = useApp();
+  const { original, openFolder, changeGameFolder, removeSavedGameFolder, convert, addPkg, cancelConvert, openConverter } = useApp();
   const dirs = original?.game_dirs ?? [];
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -209,8 +209,25 @@ function FolderMenu() {
               ))}
               {dirs.length === 0 && <li className="px-2 py-2 text-[13px] text-mute">No game folders yet.</li>}
             </ul>
-            <div className="mt-2.5">
-              <Button onClick={() => void changeGameFolder(null)} className="w-full"><IconPlus width={15} height={15} /> Add folder</Button>
+            {convert.status === "running" && (
+              <div className="mt-2.5 rounded-xl border border-accent/30 bg-accent/10 p-3">
+                <div className="flex items-center gap-2 text-[12.5px] font-medium">
+                  <Spinner spinning /> <span className="truncate">Converting {convert.name}…</span>
+                </div>
+                <div className="mt-1 truncate font-mono text-[11px] text-mute" title={convert.line}>{convert.line}</div>
+                <button type="button" onClick={() => void cancelConvert()} className="mt-2 text-[12px] font-medium text-bad hover:underline">Cancel</button>
+              </div>
+            )}
+            <div className="mt-2.5 grid grid-cols-[1fr_1fr_auto] gap-2">
+              <Button onClick={() => void changeGameFolder(null)}><IconPlus width={15} height={15} /> Add folder</Button>
+              <Button onClick={() => void addPkg()} disabled={convert.status === "running"}><IconPackage width={15} height={15} /> Add .pkg file</Button>
+              <motion.button
+                type="button" whileTap={tap} whileHover={{ scale: 1.08 }} transition={springBouncy}
+                onClick={() => openConverter(true)} aria-label=".pkg converter settings" title=".pkg converter settings"
+                className="grid h-9 w-9 place-items-center rounded-xl border border-line bg-white/[0.03] text-mute hover:bg-white/[0.08] hover:text-ink"
+              >
+                <IconSettings width={15} height={15} />
+              </motion.button>
             </div>
           </motion.div>
         )}

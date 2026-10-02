@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { useApp } from "./store/app";
 import { Ambient, Sidebar, TitleBar, Toasts } from "./components/Chrome";
+import { ConverterModal } from "./components/ConverterModal";
 import { SaveDiffModal } from "./components/SaveDiffModal";
 import { LibraryView } from "./views/Library";
 import { SettingsView } from "./views/Settings";
@@ -20,7 +21,7 @@ function Splash() {
 }
 
 export default function App() {
-  const { boot, view, init, diffOpen } = useApp();
+  const { boot, view, init, diffOpen, converterOpen } = useApp();
   useEffect(() => void init(), [init]);
 
   return (
@@ -41,6 +42,7 @@ export default function App() {
           </main>
         </div>
         <AnimatePresence>{diffOpen && <SaveDiffModal key="diff" />}</AnimatePresence>
+        <AnimatePresence>{converterOpen && <ConverterModal key="converter" />}</AnimatePresence>
         <Toasts />
       </div>
     </MotionConfig>

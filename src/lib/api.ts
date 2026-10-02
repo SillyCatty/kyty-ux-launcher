@@ -71,6 +71,22 @@ export interface Install {
   modified: number;
 }
 
+export interface ConverterConfig {
+  path: string;
+  args: string;
+  out_root: string | null;
+  running: boolean;
+}
+
+export interface ConvertDone {
+  name: string;
+  ok: boolean;
+  cancelled: boolean;
+  code: number | null;
+  found: number;
+  out_dir: string;
+}
+
 export interface Version {
   line: string | null;
   tag: string | null;
@@ -132,6 +148,10 @@ export const api = {
   setEmulatorDir: (path: string) => call<void>("set_emulator_dir", { path }),
   findInstalls: () => call<Install[]>("find_installs"),
   openFolder: (path: string) => call<void>("open_folder", { path }),
+  getConverter: () => call<ConverterConfig>("get_converter"),
+  setConverter: (path: string, args: string) => call<void>("set_converter", { path, args }),
+  convertPkg: (pkg: string) => call<string>("convert_pkg", { pkg }),
+  cancelConvert: () => call<void>("cancel_convert"),
   installEmulator: (dir?: string) => call<string>("install_emulator", { dir: dir ?? null }),
   finishSetup: () => call<void>("finish_setup"),
   resetSetup: () => call<void>("reset_setup"),
@@ -188,6 +208,16 @@ export const launcherApi = {
     };
   },
 };
+
+export async function pickFile(title: string, extensions: string[]): Promise<string | null> {
+  if (isTauri && !useMock) {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const picked = await open({ directory: false, multiple: false, title, filters: [{ name: extensions.join(", "), extensions }] });
+    return typeof picked === "string" ? picked : null;
+  }
+  if (useMock) return extensions.includes("pkg") ? "C:\\Users\\You\\Downloads\\Example Game-PPSA00000.pkg" : "C:\\Tools\\unpack.exe";
+  return window.prompt(title);
+}
 
 export async function pickFolder(title: string): Promise<string | null> {
   if (isTauri && !useMock) {

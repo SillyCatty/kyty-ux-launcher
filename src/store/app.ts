@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
-  api, errorText, launcherApi, on, pickFolder,
-  type Devices, type ExitInfo, type Game, type Install, type LauncherUpdate, type RunningInfo, type Settings, type UpdateInfo, type UpdateProgress, type Version,
+  api, errorText, launcherApi, on, pickFile, pickFolder,
+  type ConverterConfig, type ConvertDone, type Devices, type ExitInfo, type Game, type Install, type LauncherUpdate, type RunningInfo, type Settings, type UpdateInfo, type UpdateProgress, type Version,
 } from "../lib/api";
 import { DEFAULT_SETTINGS } from "../lib/fields";
 
@@ -31,6 +31,8 @@ const MAX_LOG_LINES = 300;
 let toastId = 0;
 let subscribed = false;
 let pendingLauncherUpdate: LauncherUpdate | null = null;
+/** Set when "Add .pkg file" was clicked before a converter existed, so we continue once it's saved. */
+let resumeAddPkg = false;
 
 interface AppState {
   boot: Boot;
@@ -55,6 +57,10 @@ interface AppState {
   devices: Devices | null;
   diffOpen: boolean;
   saving: boolean;
+
+  converter: ConverterConfig | null;
+  converterOpen: boolean;
+  convert: { status: "idle" | "running"; name?: string; line?: string };
 
   update: UpdateState;
   launcherVersion: string;
@@ -83,6 +89,10 @@ interface AppState {
   openFolder: (path: string) => Promise<void>;
   changeGameFolder: (old: string | null) => Promise<void>;
   removeSavedGameFolder: (dir: string) => Promise<void>;
+  addPkg: () => Promise<void>;
+  cancelConvert: () => Promise<void>;
+  openConverter: (open: boolean) => void;
+  saveConverter: (path: string, args: string) => Promise<boolean>;
   openDiff: () => void;
   closeDiff: () => void;
   cancelChanges: () => void;
@@ -98,12 +108,12 @@ interface AppState {
 export const useApp = create<AppState>((set, get) => {
   /** Loads everything that depends on a valid emulator folder. */
   const loadEmulatorData = async () => {
-    const [loaded, devices, games, version] = await Promise.all([
-      api.getSettings(), api.getDevices(), api.listGames(), api.getVersion(),
+    const [loaded, devices, games, version, converter] = await Promise.all([
+      api.getSettings(), api.getDevices(), api.listGames(), api.getVersion(), api.getConverter(),
     ]);
     // A brand-new config has no AMD patch decision yet, so suggest it for AMD CPUs.
     const draft = !loaded.config_exists && devices.amd_cpu ? { ...loaded.settings, amd_cpu_enabled: true } : loaded.settings;
-    set({ original: loaded.settings, draft, configPath: loaded.config_path, devices, games, version });
+    set({ original: loaded.settings, draft, configPath: loaded.config_path, devices, games, version, converter });
   };
 
   /** Saves only the folder list right away; other unsaved edits in Settings stay as drafts. */
@@ -141,6 +151,9 @@ export const useApp = create<AppState>((set, get) => {
     devices: null,
     diffOpen: false,
     saving: false,
+    converter: null,
+    converterOpen: false,
+    convert: { status: "idle" },
     update: { status: "idle" },
     launcherVersion: "",
     launcherUpdate: { status: "idle" },
@@ -164,6 +177,15 @@ export const useApp = create<AppState>((set, get) => {
           if (exit.code && exit.code !== 0) get().toast("error", `${name} stopped unexpectedly (exit code ${exit.code}).`);
           else get().toast("info", `${name} closed.`);
           void get().refreshGames();
+        });
+        await on<string>("convert-log", (line) => set((s) => (s.convert.status === "running" ? { convert: { ...s.convert, line } } : {})));
+        await on<ConvertDone>("convert-done", (done) => {
+          set({ convert: { status: "idle" } });
+          if (done.cancelled) get().toast("info", "Conversion cancelled.");
+          else if (!done.ok) get().toast("error", `The converter failed${done.code !== null ? ` (exit code ${done.code})` : ""}. Check its path and arguments.`);
+          else if (done.found === 0) get().toast("error", `The converter finished, but no game was found in ${done.out_dir}. Check its arguments.`);
+          else get().toast("success", `${done.name} was converted and added to your library.`);
+          if (!done.cancelled) void get().refreshGames();
         });
         await on<UpdateProgress>("update-progress", (progress) =>
           set((s) => ({
@@ -368,6 +390,53 @@ export const useApp = create<AppState>((set, get) => {
       const { original } = get();
       if (!original) return;
       await persistFolders(original.game_dirs.filter((d) => d !== dir), "Games folder removed from the library.");
+    },
+
+    /** Runs the user's own converter on a .pkg; the launcher itself never unpacks anything. */
+    addPkg: async () => {
+      if (get().convert.status === "running") return;
+      if (!get().converter?.path) {
+        resumeAddPkg = true;
+        set({ converterOpen: true });
+        return;
+      }
+      const pkg = await pickFile("Select a .pkg file", ["pkg"]);
+      if (!pkg) return;
+      try {
+        const name = await api.convertPkg(pkg);
+        set({ convert: { status: "running", name, line: "Starting…" } });
+      } catch (e) {
+        get().toast("error", errorText(e));
+      }
+    },
+
+    cancelConvert: async () => {
+      try {
+        await api.cancelConvert();
+      } catch (e) {
+        get().toast("error", errorText(e));
+      }
+    },
+
+    openConverter: (open) => {
+      if (!open) resumeAddPkg = false;
+      set({ converterOpen: open });
+    },
+
+    saveConverter: async (path, args) => {
+      try {
+        await api.setConverter(path, args);
+        set({ converter: await api.getConverter(), converterOpen: false });
+        get().toast("success", path.trim() ? "Converter saved." : "Converter cleared.");
+        if (resumeAddPkg && path.trim()) {
+          resumeAddPkg = false;
+          void get().addPkg();
+        }
+        return true;
+      } catch (e) {
+        get().toast("error", errorText(e));
+        return false;
+      }
     },
 
     openDiff: () => set({ diffOpen: true }),

@@ -14,6 +14,7 @@ A modern, animated front-end for the open-source [KytyPS5](https://github.com/Ky
 - **Review before saving**: "Save Config" shows exactly what will change; you can cancel (reverts) or apply.
 - **First-run setup**: finds an existing KytyPS5 install or downloads and installs it quietly, then walks you through profile, GPU, system and game folders.
 - **Emulator updates**: checks GitHub Releases for new KytyPS5 builds and installs them in the background, keeping your saves and settings.
+- **Game folder menu**: open, change, add or remove game folders from the Library, and optionally run a converter program of your choice on a `.pkg` (the launcher includes no unpacking or decryption tools of its own).
 - **Launcher auto-update**: the launcher updates itself from this repository's Releases (signed updates, installed quietly, then restarts).
 
 ## Install

@@ -31,6 +31,8 @@ let emulatorDir: string | null = query.has("fresh") ? null : "C:/Emu/KytyPS5";
 let setupComplete = !query.has("fresh") && !query.has("setup");
 
 let saved: Settings ={ ...DEFAULT_SETTINGS, amd_cpu_enabled: true, gpu_index: 0, printf_direction: "File", game_dirs: ["C:/Users/You/Downloads/ps5 games"] };
+let converter = { path: query.has("conv") ? "C:\\Tools\\unpack.exe" : "", args: "\"{pkg}\" \"{out}\"" };
+let cancelled = false;
 let running: RunningInfo | null = null;
 let timer: ReturnType<typeof setInterval> | undefined;
 const version: Version = { line: "Release, ver = 0.3.0, git = b7a1fac, date = 2026.09.30", tag: "KytyPS5-2026-09-30-b7a1fac", semver: "0.3.0" };
@@ -59,6 +61,23 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         : []) as T;
     }
     case "open_folder": return undefined as T;
+    case "get_converter": return { path: converter.path, args: converter.args, out_root: saved.game_dirs[0] ?? null, running: false } as T;
+    case "set_converter": converter = { path: args.path as string, args: args.args as string }; return undefined as T;
+    case "convert_pkg": {
+      cancelled = false;
+      const name = "Example Game-PPSA00000";
+      void (async () => {
+        for (const line of ["Reading package header...", "Extracting 1/3 ... 34%", "Extracting 2/3 ... 71%", "Extracting 3/3 ... 100%"]) {
+          await wait(700);
+          if (cancelled) { emit("convert-done", { name, ok: false, cancelled: true, code: null, found: 0, out_dir: "" }); return; }
+          emit("convert-log", line);
+        }
+        await wait(500);
+        emit("convert-done", { name, ok: true, cancelled: false, code: 0, found: 1, out_dir: `${saved.game_dirs[0]}/${name}` });
+      })();
+      return name as T;
+    }
+    case "cancel_convert": cancelled = true; return undefined as T;
     case "set_emulator_dir": emulatorDir = args.path as string; return undefined as T;
     case "install_emulator": {
       for (let i = 1; i <= 12; i++) { await wait(250); emit("update-progress", { stage: "downloading", downloaded: i * 2_098_000, total: 25_182_166 }); }

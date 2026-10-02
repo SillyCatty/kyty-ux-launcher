@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod convert;
 mod devices;
 mod discover;
 mod emulator;
@@ -28,6 +29,7 @@ struct AppState {
     store: Store,
     running: emulator::Running,
     updating: Arc<AtomicBool>,
+    converting: convert::Active,
 }
 
 fn now() -> u64 {
@@ -112,6 +114,82 @@ fn open_folder(path: String, state: State<'_, AppState>) -> Result<(), String> {
         return Err("That folder no longer exists.".into());
     }
     std::process::Command::new("explorer.exe").arg(&native).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct ConverterConfig {
+    path: String,
+    args: String,
+    /// Converted games are saved into the first game folder.
+    out_root: Option<String>,
+    running: bool,
+}
+
+#[tauri::command]
+fn get_converter(state: State<'_, AppState>) -> ConverterConfig {
+    let data = state.store.get();
+    let out_root = load_doc(&state).ok().and_then(|(doc, _)| settings::load(&doc).game_dirs.into_iter().next());
+    ConverterConfig { path: data.converter_path, args: data.converter_args, out_root, running: convert::is_running(&state.converting) }
+}
+
+#[tauri::command]
+fn set_converter(path: String, args: String, state: State<'_, AppState>) -> Result<(), String> {
+    let path = path.trim().to_owned();
+    let args = args.trim().to_owned();
+    if !path.is_empty() {
+        let program = Path::new(&path);
+        if !program.is_file() {
+            return Err("That program doesn't exist.".into());
+        }
+        let ext = program.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if !matches!(ext.as_str(), "exe" | "bat" | "cmd" | "com") {
+            return Err("Choose an .exe, .bat or .cmd file.".into());
+        }
+    }
+    if !args.contains("{pkg}") || !args.contains("{out}") {
+        return Err("The arguments must contain both {pkg} and {out}.".into());
+    }
+    state.store.update(|d| {
+        d.converter_path = path;
+        d.converter_args = args;
+    })
+}
+
+/// Runs the user's converter on a .pkg, writing into a new folder inside the first game folder.
+#[tauri::command]
+fn convert_pkg(app: AppHandle, pkg: String, state: State<'_, AppState>) -> Result<String, String> {
+    let data = state.store.get();
+    let program = PathBuf::from(&data.converter_path);
+    if data.converter_path.is_empty() || !program.is_file() {
+        return Err("Set up your .pkg converter first.".into());
+    }
+    let pkg_path = PathBuf::from(&pkg);
+    if !convert::is_pkg(&pkg_path) {
+        return Err("Choose a .pkg file.".into());
+    }
+    let (doc, _) = load_doc(&state)?;
+    let dirs = settings::load(&doc).game_dirs;
+    let root = dirs.first().ok_or("Add a game folder first; converted games are saved into it.")?;
+
+    let name = convert::output_name(&pkg_path);
+    let out = Path::new(root).join(&name);
+    if out.exists() && std::fs::read_dir(&out).map_or(true, |mut d| d.next().is_some()) {
+        return Err(format!("A folder named \"{name}\" already exists in {root}."));
+    }
+    std::fs::create_dir_all(&out).map_err(|e| format!("Couldn't create {}: {e}", out.display()))?;
+
+    let args = convert::render_args(&data.converter_args, &pkg_path, &out);
+    let started = convert::start(app, state.converting.clone(), program, args, name.clone(), out.clone(), games::count_in);
+    if let Err(e) = started {
+        let _ = std::fs::remove_dir(&out); // only succeeds while it's still empty
+        return Err(e);
+    }
+    Ok(name)
+}
+
+#[tauri::command]
+fn cancel_convert(state: State<'_, AppState>) -> Result<(), String> {
+    convert::cancel(&state.converting)
 }
 
 #[tauri::command]
@@ -355,6 +433,7 @@ fn main() {
                 store,
                 running: Default::default(),
                 updating: Arc::new(AtomicBool::new(false)),
+                converting: Default::default(),
             });
             Ok(())
         })
@@ -363,6 +442,10 @@ fn main() {
             set_emulator_dir,
             find_installs,
             open_folder,
+            get_converter,
+            set_converter,
+            convert_pkg,
+            cancel_convert,
             install_emulator,
             finish_setup,
             reset_setup,

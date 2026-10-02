@@ -153,9 +153,39 @@ pub fn scan(game_dirs: &[String]) -> Vec<Game> {
     games
 }
 
+/// Number of games at or under `dir`. `dir` may itself be a game folder, which a plain scan of `dir` would miss.
+pub fn count_in(dir: &Path) -> usize {
+    let Some(parent) = dir.parent() else { return 0 };
+    let key = path_key(&dir.to_string_lossy());
+    let nested = format!("{key}/");
+    scan(&[parent.to_string_lossy().into_owned()])
+        .iter()
+        .filter(|g| g.id == key || g.id.starts_with(&nested))
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_games_inside_an_output_folder() {
+        let base = std::env::temp_dir().join(format!("kyty-count-{}", std::process::id()));
+        let touch = |rel: &str| {
+            let file = base.join(rel);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, b"x").unwrap();
+        };
+        touch("Out/eboot.bin"); // the output folder is itself the game
+        touch("Out2/nested/deeper/eboot.bin"); // the game is inside the output folder
+        touch("Other/eboot.bin"); // an unrelated game must not be counted
+        fs::create_dir_all(base.join("Empty")).unwrap();
+
+        assert_eq!(count_in(&base.join("Out")), 1);
+        assert_eq!(count_in(&base.join("Out2")), 1);
+        assert_eq!(count_in(&base.join("Empty")), 0);
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn firmware_parsing() {

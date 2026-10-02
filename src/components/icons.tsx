@@ -50,6 +50,9 @@ export const IconCheck = (p: SVGProps<SVGSVGElement>) => (
 export const IconArrow = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
 );
-export const IconGamepad = (p: SVGProps<SVGSVGElement>) => (
+export const IconPackage = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}><path d="M12 3 4 7.2v9.6L12 21l8-4.2V7.2L12 3Z" /><path d="m4 7.2 8 4.3 8-4.3M12 11.5V21" /></svg>
+);
+export const IconGamepad =(p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><path d="M7 8h10a4 4 0 0 1 4 4.2l-.4 3.5a2.3 2.3 0 0 1-4 1.3L15 15H9l-1.6 2a2.3 2.3 0 0 1-4-1.3L3 12.2A4 4 0 0 1 7 8Z" /><path d="M8 10.5v3M6.5 12h3" /></svg>
 );
