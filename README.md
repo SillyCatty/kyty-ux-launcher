@@ -1,0 +1,44 @@
+# Kyty UX Launcher
+
+A modern, animated front-end for the open-source [KytyPS5](https://github.com/KytyPS5/KytyPS5) emulator, built with Rust, Tauri 2 and React.
+
+> **Alpha software.** Expect rough edges. Please report bugs in the issue tracker.
+
+> **Unofficial.** This is an independent community project. It is not affiliated with, endorsed by, or connected to Sony Interactive Entertainment or the KytyPS5 project. It contains no emulator code, games, firmware or other copyrighted material. Use only game files you own and obtained legally.
+
+## Features
+
+- **Game library**: scans your game folders, shows covers, title IDs, versions, play time and last played, and launches games with one click.
+- **Invisible launching**: starts the emulator directly with no console or extra window. Only the game's own window appears, and closing it from the launcher shuts it down cleanly.
+- **Full settings editor**: every option from the emulator's own settings dialog, written to the emulator's real config (`Kyty.ini`). Only the keys you change are touched.
+- **Review before saving**: "Save Config" shows exactly what will change; you can cancel (reverts) or apply.
+- **First-run setup**: finds an existing KytyPS5 install or downloads and installs it quietly, then walks you through profile, GPU, system and game folders.
+- **Emulator updates**: checks GitHub Releases for new KytyPS5 builds and installs them in the background, keeping your saves and settings.
+
+## Install
+
+1. Download `Kyty.Launcher_0.1.0_x64-setup.exe` from the [latest release](../../releases/latest).
+2. Run it. It installs per user and does not need administrator rights.
+3. Windows SmartScreen may warn because the installer is not code-signed. Choose **More info -> Run anyway**.
+
+Requires Windows 10/11 x64 with the WebView2 runtime (included with Windows 11).
+
+## Build from source
+
+Requirements: [Rust](https://rustup.rs), [Node.js](https://nodejs.org) 20+, and the Tauri [Windows prerequisites](https://tauri.app/start/prerequisites/).
+
+```bash
+npm install
+npm run tauri dev      # run in development
+npm run tauri build    # produce the installer in src-tauri/target/release/bundle/nsis
+```
+
+Run the backend tests with `cargo test` inside `src-tauri`.
+
+## How it works
+
+The launcher replaces the emulator's own Qt launcher. It reads and patches `Kyty.ini`, builds the same command-line flags the original launcher uses, and starts `kyty_emulator.exe` hidden. See `src-tauri/src` for the backend (`ini.rs`, `settings.rs`, `games.rs`, `emulator.rs`, `updater.rs`, `discover.rs`).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
