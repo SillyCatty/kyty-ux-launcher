@@ -146,6 +146,48 @@ export const api = {
   installUpdate: () => call<Version>("install_update"),
 };
 
+export interface LauncherUpdate {
+  version: string;
+  notes: string;
+  /** Downloads, verifies the signature and installs; the app restarts itself afterwards. */
+  install: (onProgress: (fraction: number) => void) => Promise<void>;
+}
+
+export const launcherApi = {
+  version: async (): Promise<string> => (useMock ? "0.1.1" : (await import("@tauri-apps/api/app")).getVersion()),
+
+  check: async (): Promise<LauncherUpdate | null> => {
+    if (useMock) {
+      if (!new URLSearchParams(location.search).has("lu")) return null;
+      return {
+        version: "0.1.2",
+        notes: "- Faster library loading\n- Fixed a rare crash on startup",
+        install: async (onProgress) => {
+          for (let i = 1; i <= 10; i++) { await new Promise((r) => setTimeout(r, 250)); onProgress(i / 10); }
+        },
+      };
+    }
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const update = await check();
+    if (!update) return null;
+    return {
+      version: update.version,
+      notes: update.body ?? "",
+      install: async (onProgress) => {
+        let total = 0;
+        let done = 0;
+        await update.downloadAndInstall((event) => {
+          if (event.event === "Started") total = event.data.contentLength ?? 0;
+          else if (event.event === "Progress") {
+            done += event.data.chunkLength;
+            if (total > 0) onProgress(Math.min(1, done / total));
+          } else onProgress(1);
+        });
+      },
+    };
+  },
+};
+
 export async function pickFolder(title: string): Promise<string | null> {
   if (isTauri && !useMock) {
     const { open } = await import("@tauri-apps/plugin-dialog");

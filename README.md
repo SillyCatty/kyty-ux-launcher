@@ -14,10 +14,11 @@ A modern, animated front-end for the open-source [KytyPS5](https://github.com/Ky
 - **Review before saving**: "Save Config" shows exactly what will change; you can cancel (reverts) or apply.
 - **First-run setup**: finds an existing KytyPS5 install or downloads and installs it quietly, then walks you through profile, GPU, system and game folders.
 - **Emulator updates**: checks GitHub Releases for new KytyPS5 builds and installs them in the background, keeping your saves and settings.
+- **Launcher auto-update**: the launcher updates itself from this repository's Releases (signed updates, installed quietly, then restarts).
 
 ## Install
 
-1. Download `Kyty.Launcher_0.1.0_x64-setup.exe` from the [latest release](../../releases/latest).
+1. Download the `Kyty.Launcher_*_x64-setup.exe` installer from the [latest release](../../releases/latest).
 2. Run it. It installs per user and does not need administrator rights.
 3. Windows SmartScreen may warn because the installer is not code-signed. Choose **More info -> Run anyway**.
 
@@ -34,6 +35,10 @@ npm run tauri build    # produce the installer in src-tauri/target/release/bundl
 ```
 
 Run the backend tests with `cargo test` inside `src-tauri`.
+
+### Releasing (maintainers)
+
+Updates are signed with a Tauri updater key. Set `TAURI_SIGNING_PRIVATE_KEY` (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) before `npm run tauri build`; the build then emits `*-setup.exe` and `*-setup.exe.sig`. Publish both with a `latest.json` (version, notes, signature, download URL) to the release. The public key lives in `src-tauri/tauri.conf.json`.
 
 ## How it works
 

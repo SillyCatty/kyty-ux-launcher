@@ -32,9 +32,9 @@ const NAV: { view: View; label: string; icon: typeof IconLibrary }[] = [
 ];
 
 export function Sidebar() {
-  const { view, setView, running, stop, update, original, draft, devices, version, selectGame, games } = useApp();
+  const { view, setView, running, stop, update, launcherUpdate, original, draft, devices, version, selectGame, games } = useApp();
   const dirty = useMemo(() => (original && draft ? diffSettings(original, draft, { devices }).length : 0), [original, draft, devices]);
-  const badge = (v: View) => (v === "settings" && dirty > 0 ? dirty : v === "updates" && update.status === "available" ? "new" : null);
+  const badge = (v: View) => (v === "settings" && dirty > 0 ? dirty : v === "updates" && (update.status === "available" || launcherUpdate.status === "available") ? "new" : null);
   const runningGame = games.find((g) => g.id === running?.game_id);
 
   return (

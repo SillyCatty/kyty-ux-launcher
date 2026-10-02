@@ -85,6 +85,42 @@ function StatusCard() {
   );
 }
 
+function LauncherSection() {
+  const { launcherVersion, launcherUpdate: u, checkLauncherUpdate, installLauncherUpdate, running } = useApp();
+  const busy = u.status === "checking" || u.status === "installing";
+  const line = {
+    idle: "Not checked yet.",
+    checking: "Checking for a new version…",
+    uptodate: "You're on the latest version.",
+    available: `Version ${u.version} is available.`,
+    installing: u.progress !== undefined && u.progress >= 1 ? "Installing… the launcher will restart." : "Downloading the update…",
+    error: u.error ?? "Couldn't check for updates.",
+  }[u.status];
+
+  return (
+    <Section title="Kyty UX Launcher">
+      <div className="flex flex-wrap items-center justify-between gap-4 px-2 py-1">
+        <div className="min-w-0">
+          <div className="text-[18px] font-semibold">Version {launcherVersion || "…"}</div>
+          <div className={`text-[12.5px] ${u.status === "error" ? "text-bad" : u.status === "available" ? "text-accent" : "text-mute"}`}>{line}</div>
+        </div>
+        {u.status === "available" ? (
+          <Button variant="primary" disabled={!!running} onClick={() => void installLauncherUpdate()}><IconDownload width={15} height={15} /> Install &amp; restart</Button>
+        ) : (
+          <Button disabled={busy} onClick={() => void checkLauncherUpdate(true)}><IconRefresh width={15} height={15} /> Check for updates</Button>
+        )}
+      </div>
+      {u.status === "available" && running && <p className="px-2 text-[12px] text-warn">Close the running game before updating.</p>}
+      {u.status === "available" && u.notes && (
+        <div className="mx-2 mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-xl border border-line bg-black/25 p-3.5 text-[12px] leading-relaxed text-ink/80">{u.notes}</div>
+      )}
+      {u.status === "installing" && (
+        <div className="mx-2 mt-1"><Progress value={u.progress ?? 0} indeterminate={!u.progress || u.progress >= 1} /></div>
+      )}
+    </Section>
+  );
+}
+
 export function UpdatesView() {
   const { version, repo, autoCheck, savePrefs, checkUpdate, update } = useApp();
   const [repoText, setRepoText] = useState(repo);
@@ -95,10 +131,11 @@ export function UpdatesView() {
     <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit" className="flex h-full flex-col overflow-y-auto px-8 pb-8">
       <motion.header variants={itemVariants} className="pb-5 pt-2">
         <h1 className="text-[28px] font-semibold tracking-tight">Updates</h1>
-        <p className="text-[13px] text-mute">Keeps your KytyPS5 build current, straight from GitHub releases.</p>
+        <p className="text-[13px] text-mute">Keeps this launcher and your KytyPS5 build current, straight from GitHub releases.</p>
       </motion.header>
 
       <div className="grid max-w-[860px] gap-4">
+        <LauncherSection />
         <Section title="Installed build">
           <div className="flex flex-wrap items-center justify-between gap-4 px-2 py-1">
             <div>

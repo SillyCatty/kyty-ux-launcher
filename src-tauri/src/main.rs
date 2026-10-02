@@ -323,6 +323,7 @@ fn detect_emulator_dir() -> Option<PathBuf> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("launcher.json");
             let store = Store::load(path);

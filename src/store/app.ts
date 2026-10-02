@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
-  api, errorText, on, pickFolder,
-  type Devices, type ExitInfo, type Game, type Install, type RunningInfo, type Settings, type UpdateInfo, type UpdateProgress, type Version,
+  api, errorText, launcherApi, on, pickFolder,
+  type Devices, type ExitInfo, type Game, type Install, type LauncherUpdate, type RunningInfo, type Settings, type UpdateInfo, type UpdateProgress, type Version,
 } from "../lib/api";
 import { DEFAULT_SETTINGS } from "../lib/fields";
 
@@ -14,6 +14,13 @@ export interface UpdateState {
   progress?: UpdateProgress;
   error?: string;
 }
+export interface LauncherUpdateState {
+  status: "idle" | "checking" | "available" | "uptodate" | "error" | "installing";
+  version?: string;
+  notes?: string;
+  progress?: number;
+  error?: string;
+}
 export interface EmulatorInstall {
   status: "idle" | "installing" | "error";
   progress?: UpdateProgress;
@@ -23,6 +30,7 @@ export interface EmulatorInstall {
 const MAX_LOG_LINES = 300;
 let toastId = 0;
 let subscribed = false;
+let pendingLauncherUpdate: LauncherUpdate | null = null;
 
 interface AppState {
   boot: Boot;
@@ -49,9 +57,13 @@ interface AppState {
   saving: boolean;
 
   update: UpdateState;
+  launcherVersion: string;
+  launcherUpdate: LauncherUpdateState;
   toasts: Toast[];
 
   init: () => Promise<void>;
+  checkLauncherUpdate: (manual: boolean) => Promise<void>;
+  installLauncherUpdate: () => Promise<void>;
   scanInstalls: () => Promise<void>;
   adoptInstall: (path: string) => Promise<boolean>;
   browseForEmulator: () => Promise<void>;
@@ -113,6 +125,8 @@ export const useApp = create<AppState>((set, get) => {
     diffOpen: false,
     saving: false,
     update: { status: "idle" },
+    launcherVersion: "",
+    launcherUpdate: { status: "idle" },
     toasts: [],
 
     toast: (kind, text) => {
@@ -148,6 +162,7 @@ export const useApp = create<AppState>((set, get) => {
           emulatorDir: snap.emulator_dir, repo: snap.repo, autoCheck: snap.auto_check_updates,
           running: snap.running, defaultInstallDir: snap.default_install_dir,
         });
+        void launcherApi.version().then((launcherVersion) => set({ launcherVersion }));
         if (snap.emulator_dir) await loadEmulatorData();
         if (!snap.emulator_dir || !snap.setup_complete) {
           set({ boot: "setup" });
@@ -155,9 +170,49 @@ export const useApp = create<AppState>((set, get) => {
           return;
         }
         set({ boot: "ready" });
-        if (snap.auto_check_updates) void get().checkUpdate(false);
+        if (snap.auto_check_updates) {
+          void get().checkUpdate(false);
+          void get().checkLauncherUpdate(false);
+        }
       } catch (e) {
         set({ boot: "setup" });
+        get().toast("error", errorText(e));
+      }
+    },
+
+    checkLauncherUpdate: async (manual) => {
+      if (get().launcherUpdate.status === "installing") return;
+      set({ launcherUpdate: { status: "checking" } });
+      try {
+        if (!get().launcherVersion) set({ launcherVersion: await launcherApi.version() });
+        pendingLauncherUpdate = await launcherApi.check();
+        if (!pendingLauncherUpdate) {
+          set({ launcherUpdate: { status: "uptodate" } });
+          return;
+        }
+        set({ launcherUpdate: { status: "available", version: pendingLauncherUpdate.version, notes: pendingLauncherUpdate.notes } });
+        if (!manual) get().toast("info", `Launcher update available: v${pendingLauncherUpdate.version}`);
+      } catch (e) {
+        set({ launcherUpdate: { status: "error", error: errorText(e) } });
+        if (manual) get().toast("error", errorText(e));
+      }
+    },
+
+    installLauncherUpdate: async () => {
+      const update = pendingLauncherUpdate;
+      const { launcherUpdate, running } = get();
+      if (!update || launcherUpdate.status !== "available") return;
+      if (running) {
+        get().toast("error", "Close the running game before updating the launcher.");
+        return;
+      }
+      const base = { version: launcherUpdate.version, notes: launcherUpdate.notes };
+      set({ launcherUpdate: { status: "installing", ...base, progress: 0 } });
+      try {
+        await update.install((progress) => set({ launcherUpdate: { status: "installing", ...base, progress } }));
+        // On Windows the installer closes and relaunches the app, so this is only reached briefly.
+      } catch (e) {
+        set({ launcherUpdate: { status: "error", ...base, error: errorText(e) } });
         get().toast("error", errorText(e));
       }
     },
