@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { imageSrc, type Game } from "../lib/api";
 import { formatDate, formatPlayTime } from "../lib/fields";
-import { backdropVariants, gridVariants, hoverLift, itemVariants, modalVariants, pageVariants, springBouncy, tap } from "../lib/motion";
+import { backdropVariants, gridVariants, hoverLift, itemVariants, modalVariants, pageVariants, smooth, springBouncy, springSnappy, tap } from "../lib/motion";
 import { useApp } from "../store/app";
 import { Button, Select } from "../components/ui";
-import { IconGamepad, IconPlay, IconRefresh, IconSearch, IconStop, IconClose, IconSettings } from "../components/icons";
+import { IconFolder, IconGamepad, IconPlay, IconPlus, IconRefresh, IconSearch, IconStop, IconTrash, IconClose, IconSettings } from "../components/icons";
 
 type Sort = "name" | "recent" | "playtime";
 
@@ -32,7 +32,7 @@ function GameCard({ game }: { game: Game }) {
       onClick={() => selectGame(game.id)}
       className="group relative cursor-pointer"
     >
-      <motion.div layoutId={`cover-${game.id}`} transition={springBouncy} className="relative aspect-square overflow-hidden rounded-2xl border border-line bg-panel-2 shadow-lg shadow-black/40">
+      <motion.div layoutId={`cover-${game.id}`} transition={smooth} className="relative aspect-square overflow-hidden rounded-2xl border border-line bg-panel-2 shadow-lg shadow-black/40">
         <Cover game={game} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         {isRunning && (
@@ -100,8 +100,8 @@ function GameDetail({ game }: { game: Game }) {
   return (
     <motion.div variants={backdropVariants} initial="initial" animate="animate" exit="exit" onClick={close}
       className="absolute inset-0 z-40 grid place-items-center bg-black/60 p-6 backdrop-blur-sm">
-      <motion.div variants={modalVariants} onClick={(e) => e.stopPropagation()} className="card relative flex max-h-full w-full max-w-[860px] flex-col overflow-hidden !rounded-3xl shadow-2xl shadow-black/60">
-        <div className="relative h-52 shrink-0 overflow-hidden">
+      <motion.div variants={modalVariants} onClick={(e) => e.stopPropagation()} className="card relative flex max-h-full w-full max-w-[860px] flex-col !rounded-3xl shadow-2xl shadow-black/60">
+        <div className="relative h-52 shrink-0 overflow-hidden rounded-t-3xl">
           {bg && <motion.img initial={{ scale: 1.15, opacity: 0 }} animate={{ scale: 1, opacity: 0.55 }} transition={{ duration: 0.8 }} src={bg} alt="" className="absolute inset-0 h-full w-full object-cover" />}
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-panel/40 to-panel" />
           <motion.button whileTap={tap} whileHover={{ rotate: 90 }} transition={springBouncy} onClick={close} aria-label="Close" className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full bg-black/40 text-white/80 backdrop-blur hover:text-white">
@@ -109,9 +109,10 @@ function GameDetail({ game }: { game: Game }) {
           </motion.button>
         </div>
 
-        <div className="relative -mt-24 flex flex-col gap-5 overflow-y-auto px-8 pb-8">
+        {/* The header is outside every clipping/scrolling container so the icon can never be cut off while it animates. */}
+        <div className="relative z-10 -mt-24 shrink-0 px-8">
           <motion.div variants={itemVariants} className="flex items-end gap-6">
-            <motion.div layoutId={`cover-${game.id}`} transition={springBouncy} className="h-36 w-36 shrink-0 overflow-hidden rounded-2xl border border-white/10 shadow-2xl shadow-black/60">
+            <motion.div layoutId={`cover-${game.id}`} transition={smooth} className="h-36 w-36 shrink-0 overflow-hidden rounded-2xl border border-white/10 shadow-2xl shadow-black/60">
               <Cover game={game} />
             </motion.div>
             <div className="min-w-0 flex-1 pb-1">
@@ -119,7 +120,9 @@ function GameDetail({ game }: { game: Game }) {
               <div className="mt-1 truncate font-mono text-[11.5px] text-mute" title={game.path}>{game.path}</div>
             </div>
           </motion.div>
+        </div>
 
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-8 pb-8 pt-5">
           <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-3">
             {isRunning ? (
               <Button variant="danger" onClick={stop} className="!h-11 !px-7"><IconStop width={14} height={14} /> Stop game</Button>
@@ -160,6 +163,69 @@ function GameDetail({ game }: { game: Game }) {
   );
 }
 
+function FolderMenu() {
+  const { original, openFolder, changeGameFolder, removeSavedGameFolder } = useApp();
+  const dirs = original?.game_dirs ?? [];
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", away);
+    window.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  return (
+    <div ref={root} className="absolute bottom-6 right-8 z-30">
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: 0.96 }}
+            transition={{ opacity: { duration: 0.14 }, y: springSnappy, scale: springBouncy }}
+            style={{ transformOrigin: "bottom right" }}
+            className="card absolute bottom-full right-0 mb-3 w-[500px] !rounded-2xl p-3 shadow-2xl shadow-black/60"
+          >
+            <div className="px-2 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-mute">Game folders</div>
+            <ul className="no-scrollbar flex max-h-60 flex-col gap-1.5 overflow-y-auto">
+              {dirs.map((d) => (
+                <li key={d} className="flex items-center gap-2 rounded-xl border border-line bg-black/20 px-3 py-2">
+                  <IconFolder width={16} height={16} className="shrink-0 text-accent" />
+                  <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={d}>{d}</span>
+                  <button type="button" onClick={() => void openFolder(d)} className="rounded-lg px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent/15">Open</button>
+                  <button type="button" onClick={() => void changeGameFolder(d)} className="rounded-lg px-2 py-1 text-[12px] font-medium text-mute hover:bg-white/10 hover:text-ink">Change</button>
+                  <button
+                    type="button" onClick={() => void removeSavedGameFolder(d)} aria-label={`Remove ${d}`} title="Remove from library (nothing is deleted from disk)"
+                    className="grid h-7 w-7 place-items-center rounded-lg text-mute hover:bg-bad/15 hover:text-bad"
+                  >
+                    <IconTrash width={15} height={15} />
+                  </button>
+                </li>
+              ))}
+              {dirs.length === 0 && <li className="px-2 py-2 text-[13px] text-mute">No game folders yet.</li>}
+            </ul>
+            <div className="mt-2.5">
+              <Button onClick={() => void changeGameFolder(null)} className="w-full"><IconPlus width={15} height={15} /> Add folder</Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <motion.button
+        type="button" onClick={() => setOpen(!open)} whileHover={{ scale: 1.08 }} whileTap={tap} transition={springBouncy}
+        aria-label="Game folders" aria-expanded={open} title="Game folders"
+        className={`grid h-12 w-12 place-items-center rounded-2xl border shadow-xl shadow-black/50 transition-colors ${open ? "border-accent/60 bg-accent/15 text-accent" : "border-line bg-panel-2 text-ink hover:border-accent/60"}`}
+      >
+        <IconFolder width={20} height={20} />
+      </motion.button>
+    </div>
+  );
+}
+
 export function LibraryView() {
   const { games, gamesLoading, refreshGames, selectedGameId, setView } = useApp();
   const [query, setQuery] = useState("");
@@ -197,7 +263,7 @@ export function LibraryView() {
         </div>
       </motion.header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-24">
         {shown.length > 0 ? (
           <motion.div variants={gridVariants} initial="initial" animate="animate" key={`${query}-${sort}`} className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-x-5 gap-y-7 pt-2">
             {shown.map((g) => <GameCard key={g.id} game={g} />)}
@@ -215,6 +281,8 @@ export function LibraryView() {
           </motion.div>
         )}
       </div>
+
+      <FolderMenu />
 
       <AnimatePresence>{selected && <GameDetail key={selected.id} game={selected} />}</AnimatePresence>
     </motion.div>

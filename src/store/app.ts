@@ -80,6 +80,9 @@ interface AppState {
   resetToDefaults: () => void;
   addGameFolder: () => Promise<void>;
   removeGameFolder: (dir: string) => void;
+  openFolder: (path: string) => Promise<void>;
+  changeGameFolder: (old: string | null) => Promise<void>;
+  removeSavedGameFolder: (dir: string) => Promise<void>;
   openDiff: () => void;
   closeDiff: () => void;
   cancelChanges: () => void;
@@ -101,6 +104,20 @@ export const useApp = create<AppState>((set, get) => {
     // A brand-new config has no AMD patch decision yet, so suggest it for AMD CPUs.
     const draft = !loaded.config_exists && devices.amd_cpu ? { ...loaded.settings, amd_cpu_enabled: true } : loaded.settings;
     set({ original: loaded.settings, draft, configPath: loaded.config_path, devices, games, version });
+  };
+
+  /** Saves only the folder list right away; other unsaved edits in Settings stay as drafts. */
+  const persistFolders = async (next: string[], message: string) => {
+    const { original, draft } = get();
+    if (!original || !draft) return;
+    try {
+      await api.saveSettings({ ...original, game_dirs: next });
+      set({ original: { ...original, game_dirs: next }, draft: { ...draft, game_dirs: next } });
+      await get().refreshGames();
+      get().toast("success", message);
+    } catch (e) {
+      get().toast("error", errorText(e));
+    }
   };
 
   return {
@@ -324,6 +341,34 @@ export const useApp = create<AppState>((set, get) => {
       get().patchDraft({ game_dirs: [...draft.game_dirs, norm] });
     },
     removeGameFolder: (dir) => set((s) => (s.draft ? { draft: { ...s.draft, game_dirs: s.draft.game_dirs.filter((d) => d !== dir) } } : {})),
+
+    openFolder: async (path) => {
+      try {
+        await api.openFolder(path);
+      } catch (e) {
+        get().toast("error", errorText(e));
+      }
+    },
+
+    /** Replaces `old` with a newly picked folder (or adds one when `old` is null) and saves right away. */
+    changeGameFolder: async (old) => {
+      const { original } = get();
+      if (!original) return;
+      const picked = await pickFolder(old ? "Choose the new location for this games folder" : "Select a folder that contains your games");
+      if (!picked) return;
+      const norm = picked.replace(/\\/g, "/").replace(/\/+$/, "");
+      const swapped = old ? original.game_dirs.map((d) => (d === old ? norm : d)) : [...original.game_dirs, norm];
+      const seen = new Set<string>();
+      const next = swapped.filter((d) => !seen.has(d.toLowerCase()) && seen.add(d.toLowerCase()));
+      await persistFolders(next, old ? "Games folder changed." : "Games folder added.");
+    },
+
+    /** Removes a folder from the library. Nothing on disk is deleted. */
+    removeSavedGameFolder: async (dir) => {
+      const { original } = get();
+      if (!original) return;
+      await persistFolders(original.game_dirs.filter((d) => d !== dir), "Games folder removed from the library.");
+    },
 
     openDiff: () => set({ diffOpen: true }),
     closeDiff: () => set({ diffOpen: false }),

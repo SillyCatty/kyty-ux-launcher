@@ -58,6 +58,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         ? [{ path: "C:\\Users\\You\\Downloads\\KytyPS5-Windows-x64", modified: 1_790_700_000 }, { path: "D:\\Games\\KytyPS5", modified: 1_780_000_000 }]
         : []) as T;
     }
+    case "open_folder": return undefined as T;
     case "set_emulator_dir": emulatorDir = args.path as string; return undefined as T;
     case "install_emulator": {
       for (let i = 1; i <= 12; i++) { await wait(250); emit("update-progress", { stage: "downloading", downloaded: i * 2_098_000, total: 25_182_166 }); }

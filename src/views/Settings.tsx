@@ -118,7 +118,7 @@ export function SettingsView() {
         </div>
         <div className="flex gap-2.5">
           <Button onClick={resetToDefaults}>Reset to defaults</Button>
-          <Button variant="primary" disabled={!changes.length || nameInvalid || idInvalid} onClick={openDiff}>Save Config</Button>
+          <Button variant="primary" pulse disabled={!changes.length || nameInvalid || idInvalid} onClick={openDiff}>Save Config</Button>
         </div>
       </motion.footer>
     </motion.div>

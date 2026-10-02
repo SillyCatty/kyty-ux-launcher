@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "motion/react";
 import { itemVariants, popoverVariants, springBouncy, springSnappy, tap } from "../lib/motion";
 
 export function Section({ title, children, className = "" }: { title: string; children: ReactNode; className?: string }) {
@@ -24,33 +24,48 @@ export function Row({ label, hint, children }: { label: string; hint?: string; c
   );
 }
 
+/** Track is 44x24 and the knob 20x20 inset 2px, so the knob travels exactly 20px and is centred on both axes. */
+const TOGGLE_TRAVEL = 20;
+
 export function Toggle({ checked, onChange, label, hint, disabled }: {
   checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean;
 }) {
+  const x = useMotionValue(checked ? TOGGLE_TRAVEL : 0);
+  // The track colour is derived from the knob position, so it changes live while you drag.
+  const backgroundColor = useTransform(x, [0, TOGGLE_TRAVEL], ["#232a37", "#7c8cff"]);
+  const dragged = useRef(false);
+
+  useEffect(() => {
+    const controls = animate(x, checked ? TOGGLE_TRAVEL : 0, springBouncy);
+    return () => controls.stop();
+  }, [checked, x]);
+
   return (
-    <motion.button
+    <button
       type="button" role="switch" aria-checked={checked} disabled={disabled}
-      onClick={() => onChange(!checked)}
-      whileTap={disabled ? undefined : { scale: 0.985 }}
+      onClick={() => { if (!dragged.current) onChange(!checked); }}
       className="flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/[0.04] disabled:opacity-45"
     >
-      <motion.span
-        className="relative h-6 w-11 shrink-0 rounded-full border border-white/5"
-        animate={{ backgroundColor: checked ? "#7c8cff" : "#232a37" }}
-        transition={{ duration: 0.2 }}
-      >
+      <motion.span style={{ backgroundColor }} className="relative block h-6 w-11 shrink-0 rounded-full ring-1 ring-inset ring-white/5">
         <motion.span
-          className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-md"
-          animate={{ x: checked ? 20 : 0, scale: 1 }}
-          whileTap={{ scaleX: 1.25 }}
-          transition={springBouncy}
+          drag={disabled ? false : "x"} dragConstraints={{ left: 0, right: TOGGLE_TRAVEL }} dragElastic={0} dragMomentum={false}
+          style={{ x }} whileTap={{ scaleX: 1.2 }}
+          onDragStart={() => { dragged.current = true; }}
+          onDragEnd={() => {
+            const next = x.get() > TOGGLE_TRAVEL / 2;
+            animate(x, next ? TOGGLE_TRAVEL : 0, springBouncy);
+            if (next !== checked) onChange(next);
+            // The click that follows a drag must not flip the switch again.
+            setTimeout(() => { dragged.current = false; }, 60);
+          }}
+          className="absolute left-[2px] top-[2px] h-5 w-5 cursor-grab rounded-full bg-white shadow-md active:cursor-grabbing"
         />
       </motion.span>
       <span className="min-w-0">
         <span className="block text-[13px] text-ink">{label}</span>
         {hint && <span className="block text-[11.5px] text-mute">{hint}</span>}
       </span>
-    </motion.button>
+    </button>
   );
 }
 
@@ -223,19 +238,32 @@ export function Progress({ value, indeterminate }: { value: number; indeterminat
   );
 }
 
-export function Button({ children, onClick, variant = "ghost", disabled, className = "" }: {
-  children: ReactNode; onClick?: () => void; variant?: "primary" | "ghost" | "danger"; disabled?: boolean; className?: string;
+const GLOW_OFF = "0 8px 24px -8px rgba(124,140,255,0)";
+const GLOW_LOW = "0 8px 24px -8px rgba(124,140,255,0.35)";
+const GLOW_HIGH = "0 8px 32px -2px rgba(124,140,255,0.9)";
+
+/** `pulse` makes an enabled button breathe with a soft glow to draw attention; disabled buttons fade out. */
+export function Button({ children, onClick, variant = "ghost", disabled, className = "", pulse = false }: {
+  children: ReactNode; onClick?: () => void; variant?: "primary" | "ghost" | "danger"; disabled?: boolean; className?: string; pulse?: boolean;
 }) {
   const styles = {
     primary: "btn-primary",
     ghost: "border border-line bg-white/[0.03] text-ink hover:bg-white/[0.08]",
     danger: "border border-bad/30 bg-bad/10 text-bad hover:bg-bad/20",
   }[variant];
+  const glowing = pulse && !disabled;
   return (
     <motion.button
       type="button" onClick={onClick} disabled={disabled}
-      whileHover={disabled ? undefined : { scale: 1.04 }} whileTap={disabled ? undefined : tap} transition={springBouncy}
-      className={`inline-flex h-9 items-center justify-center gap-2 rounded-xl px-4 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${styles} ${className}`}
+      whileHover={disabled ? undefined : { scale: 1.04 }} whileTap={disabled ? undefined : tap}
+      initial={false}
+      animate={{ opacity: disabled ? 0.4 : 1, ...(pulse ? { boxShadow: glowing ? [GLOW_LOW, GLOW_HIGH, GLOW_LOW] : GLOW_OFF } : {}) }}
+      transition={{
+        default: springBouncy,
+        opacity: { duration: 0.35, ease: "easeInOut" },
+        boxShadow: glowing ? { duration: 1.9, repeat: Infinity, ease: "easeInOut" } : { duration: 0.35 },
+      }}
+      className={`inline-flex h-9 items-center justify-center gap-2 rounded-xl px-4 text-[13px] font-medium transition-colors disabled:cursor-not-allowed ${styles} ${className}`}
     >
       {children}
     </motion.button>

@@ -1,6 +1,6 @@
 [package]
 name = "kyty-launcher"
-version = "0.1.1"
+version = "0.1.2"
 description = "A modern launcher for the KytyPS5 emulator"
 edition = "2021"
 

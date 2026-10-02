@@ -131,6 +131,7 @@ export const api = {
   getState: () => call<Snapshot>("get_state"),
   setEmulatorDir: (path: string) => call<void>("set_emulator_dir", { path }),
   findInstalls: () => call<Install[]>("find_installs"),
+  openFolder: (path: string) => call<void>("open_folder", { path }),
   installEmulator: (dir?: string) => call<string>("install_emulator", { dir: dir ?? null }),
   finishSetup: () => call<void>("finish_setup"),
   resetSetup: () => call<void>("reset_setup"),

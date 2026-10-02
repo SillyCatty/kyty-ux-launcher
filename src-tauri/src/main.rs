@@ -95,6 +95,25 @@ async fn find_installs(state: State<'_, AppState>) -> Result<Vec<discover::Insta
         .map_err(|e| e.to_string())
 }
 
+/// Opens a game folder (or a folder inside one) in Explorer. Anything outside the configured game folders is refused.
+#[tauri::command]
+fn open_folder(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (doc, _) = load_doc(&state)?;
+    let key = settings::path_key(&path);
+    let allowed = settings::load(&doc).game_dirs.iter().any(|dir| {
+        let root = settings::path_key(dir);
+        key == root || key.starts_with(&format!("{root}/"))
+    });
+    if !allowed {
+        return Err("That folder isn't one of your game folders.".into());
+    }
+    let native = path.replace('/', "\\");
+    if !Path::new(&native).is_dir() {
+        return Err("That folder no longer exists.".into());
+    }
+    std::process::Command::new("explorer.exe").arg(&native).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn finish_setup(state: State<'_, AppState>) -> Result<(), String> {
     state.store.update(|d| d.setup_complete = true)
@@ -343,6 +362,7 @@ fn main() {
             get_state,
             set_emulator_dir,
             find_installs,
+            open_folder,
             install_emulator,
             finish_setup,
             reset_setup,

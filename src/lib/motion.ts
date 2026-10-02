@@ -6,33 +6,31 @@ export const spring: Transition = { type: "spring", stiffness: 420, damping: 30,
 export const springSnappy: Transition = { type: "spring", stiffness: 640, damping: 34, mass: 0.6 };
 export const springSoft: Transition = { type: "spring", stiffness: 220, damping: 24, mass: 1 };
 
-const fade: Transition = { duration: 0.22, ease: "easeOut" };
+const fade: Transition = { duration: 0.16, ease: "easeOut" };
 
-/** Opacity runs on a tween while position/scale run on springs, all at the same time. */
-const parallel = (stagger = 0): Transition => ({
-  opacity: fade,
-  y: spring,
-  scale: springBouncy,
-  filter: { duration: 0.28 },
-  staggerChildren: stagger,
-  delayChildren: stagger ? 0.05 : 0,
-});
+/** Fluid, non-bouncy glide for elements travelling back to their place (e.g. a game card closing). */
+export const smooth: Transition = { type: "tween", duration: 0.42, ease: [0.32, 0.72, 0, 1] };
 
+/** Page changes must feel instant: a very short exit, an immediate enter and a light stagger. */
 export const pageVariants: Variants = {
-  initial: { opacity: 0, y: 22, scale: 0.985, filter: "blur(6px)" },
-  animate: { opacity: 1, y: 0, scale: 1, filter: "blur(0px)", transition: parallel(0.055) },
-  exit: { opacity: 0, y: -12, scale: 0.992, filter: "blur(4px)", transition: { duration: 0.15 } },
+  initial: { opacity: 0, y: 10 },
+  animate: {
+    opacity: 1, y: 0,
+    transition: { opacity: { duration: 0.14 }, y: { type: "spring", stiffness: 560, damping: 40 }, staggerChildren: 0.015 },
+  },
+  exit: { opacity: 0, transition: { duration: 0.04 } },
 };
 
 export const itemVariants: Variants = {
   initial: { opacity: 0, y: 18, scale: 0.96 },
   animate: { opacity: 1, y: 0, scale: 1, transition: { opacity: fade, y: spring, scale: springBouncy } },
-  exit: { opacity: 0, y: 8, scale: 0.97, transition: { duration: 0.12 } },
+  // Kept near-instant: the outgoing page's children must finish before the next page can mount.
+  exit: { opacity: 0, transition: { duration: 0.03 } },
 };
 
 export const gridVariants: Variants = {
   initial: {},
-  animate: { transition: { staggerChildren: 0.045, delayChildren: 0.06 } },
+  animate: { transition: { staggerChildren: 0.035, delayChildren: 0.02 } },
 };
 
 export const popoverVariants: Variants = {
