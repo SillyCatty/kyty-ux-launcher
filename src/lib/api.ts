@@ -30,8 +30,33 @@ export interface Settings {
   game_dirs: string[];
 }
 
+export type Platform = "ps5" | "ps4";
+
+/** Settings for the original Kyty (PS4) emulator; they live in the launcher, not in Kyty.ini. */
+export interface Ps4Settings {
+  screen_resolution: string;
+  neo: boolean;
+  vulkan_validation_enabled: boolean;
+  shader_validation_enabled: boolean;
+  shader_optimization_type: string;
+  shader_log_direction: string;
+  shader_log_folder: string;
+  command_buffer_dump_enabled: boolean;
+  command_buffer_dump_folder: string;
+  printf_direction: string;
+  printf_output_file: string;
+  profiler_direction: string;
+  profiler_output_file: string;
+}
+
+export interface GameModules {
+  available: string[];
+  selected: string[];
+}
+
 export interface Game {
   id: string;
+  platform: Platform;
   name: string;
   title_id: string;
   version: string;
@@ -63,6 +88,9 @@ export interface Snapshot {
   auto_check_updates: boolean;
   setup_complete: boolean;
   default_install_dir: string;
+  ps4_dir: string | null;
+  ps4_repo: string;
+  default_ps4_install_dir: string;
   running: RunningInfo | null;
 }
 
@@ -145,26 +173,31 @@ export const imageSrc = (path: string | null) =>
 
 export const api = {
   getState: () => call<Snapshot>("get_state"),
-  setEmulatorDir: (path: string) => call<void>("set_emulator_dir", { path }),
-  findInstalls: () => call<Install[]>("find_installs"),
+  setEmulatorDir: (path: string, platform: Platform = "ps5") => call<void>("set_emulator_dir", { path, platform }),
+  clearPs4: () => call<void>("clear_ps4"),
+  getPs4Settings: () => call<Ps4Settings>("get_ps4_settings"),
+  savePs4Settings: (settings: Ps4Settings) => call<string[]>("save_ps4_settings", { new: settings }),
+  getGameModules: (gameId: string) => call<GameModules>("get_game_modules", { gameId }),
+  setGameModules: (gameId: string, selected: string[]) => call<void>("set_game_modules", { gameId, selected }),
+  findInstalls: (platform: Platform = "ps5") => call<Install[]>("find_installs", { platform }),
   openFolder: (path: string) => call<void>("open_folder", { path }),
   getConverter: () => call<ConverterConfig>("get_converter"),
   setConverter: (path: string, args: string) => call<void>("set_converter", { path, args }),
   convertPkg: (pkg: string) => call<string>("convert_pkg", { pkg }),
   cancelConvert: () => call<void>("cancel_convert"),
-  installEmulator: (dir?: string) => call<string>("install_emulator", { dir: dir ?? null }),
+  installEmulator: (dir?: string, platform: Platform = "ps5") => call<string>("install_emulator", { dir: dir ?? null, platform }),
   finishSetup: () => call<void>("finish_setup"),
   resetSetup: () => call<void>("reset_setup"),
   setUpdatePrefs: (repo: string, autoCheck: boolean) => call<void>("set_update_prefs", { repo, autoCheck }),
-  getVersion: () => call<Version>("get_version"),
+  getVersion: (platform: Platform = "ps5") => call<Version>("get_version", { platform }),
   getSettings: () => call<{ settings: Settings; config_path: string; config_exists: boolean }>("get_settings"),
   saveSettings: (settings: Settings) => call<string[]>("save_settings", { new: settings }),
   listGames: () => call<Game[]>("list_games"),
   launchGame: (gameId: string) => call<RunningInfo>("launch_game", { gameId }),
   stopGame: () => call<void>("stop_game"),
   getDevices: () => call<Devices>("get_devices"),
-  checkUpdate: () => call<UpdateInfo>("check_update"),
-  installUpdate: () => call<Version>("install_update"),
+  checkUpdate: (platform: Platform = "ps5") => call<UpdateInfo>("check_update", { platform }),
+  installUpdate: (platform: Platform = "ps5") => call<Version>("install_update", { platform }),
 };
 
 export interface LauncherUpdate {

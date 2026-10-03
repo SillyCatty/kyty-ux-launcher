@@ -1,4 +1,4 @@
-import type { Devices, Settings } from "./api";
+import type { Devices, Ps4Settings, Settings } from "./api";
 
 export const CONSOLE_LANGUAGES = [
   "Japanese", "English (United States)", "French (France)", "Spanish (Spain)", "German", "Italian",
@@ -122,6 +122,56 @@ export function diffSettings(original: Settings, draft: Settings, ctx: Ctx): Dif
         row.removed = before.filter((d) => !after.includes(d));
       }
       return row;
+    });
+}
+
+export const PS4_RESOLUTIONS = ["1280x720", "1920x1080"];
+export const PROFILER_DIRECTIONS = ["None", "File", "Network", "FileAndNetwork"];
+
+export const DEFAULT_PS4_SETTINGS: Ps4Settings = {
+  screen_resolution: "1280x720",
+  neo: true,
+  vulkan_validation_enabled: false,
+  shader_validation_enabled: true,
+  shader_optimization_type: "Performance",
+  shader_log_direction: "Silent",
+  shader_log_folder: "_Shaders",
+  command_buffer_dump_enabled: false,
+  command_buffer_dump_folder: "_Buffers",
+  printf_direction: "Silent",
+  printf_output_file: "_kyty.txt",
+  profiler_direction: "None",
+  profiler_output_file: "_profile.prof",
+};
+
+export const PS4_META: Record<keyof Ps4Settings, { label: string; group: string; format: (v: never) => string }> = {
+  screen_resolution: { label: "Screen resolution", group: "Graphics & display", format: plain },
+  neo: { label: "PS4 Pro mode (Neo)", group: "Graphics & display", format: onOff as never },
+  vulkan_validation_enabled: { label: "Vulkan validation", group: "Debugging & logs", format: onOff as never },
+  shader_validation_enabled: { label: "Shader validation", group: "Debugging & logs", format: onOff as never },
+  shader_optimization_type: { label: "Shader optimization", group: "Graphics & display", format: plain },
+  shader_log_direction: { label: "Shader logging", group: "Debugging & logs", format: plain },
+  shader_log_folder: { label: "Shader log folder", group: "Debugging & logs", format: plain },
+  command_buffer_dump_enabled: { label: "Command buffer dump", group: "Debugging & logs", format: onOff as never },
+  command_buffer_dump_folder: { label: "Command buffer folder", group: "Debugging & logs", format: plain },
+  printf_direction: { label: "Printf output", group: "Debugging & logs", format: plain },
+  printf_output_file: { label: "Printf output file", group: "Debugging & logs", format: plain },
+  profiler_direction: { label: "Profiler", group: "Debugging & logs", format: plain },
+  profiler_output_file: { label: "Profiler output file", group: "Debugging & logs", format: plain },
+};
+
+export function diffPs4(original: Ps4Settings, draft: Ps4Settings): DiffRow[] {
+  return (Object.keys(PS4_META) as (keyof Ps4Settings)[])
+    .filter((key) => original[key] !== draft[key])
+    .map((key) => {
+      const meta = PS4_META[key];
+      return {
+        key: key as unknown as keyof Settings,
+        label: meta.label,
+        group: meta.group,
+        before: meta.format(original[key] as never),
+        after: meta.format(draft[key] as never),
+      };
     });
 }
 

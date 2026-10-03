@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { motion } from "motion/react";
-import { diffSettings } from "../lib/fields";
+import { diffPs4, diffSettings } from "../lib/fields";
 import { backdropVariants, itemVariants, modalVariants } from "../lib/motion";
 import { useApp } from "../store/app";
 import { Button } from "./ui";
@@ -8,8 +8,12 @@ import { IconArrow } from "./icons";
 
 /** Lists ONLY the settings that differ from the saved config, then asks to apply or revert. */
 export function SaveDiffModal() {
-  const { original, draft, devices, closeDiff, cancelChanges, saveChanges, saving } = useApp();
-  const rows = useMemo(() => (original && draft ? diffSettings(original, draft, { devices }) : []), [original, draft, devices]);
+  const { original, draft, devices, ps4Original, ps4Draft, settingsPlatform, closeDiff, cancelChanges, saveChanges, saving } = useApp();
+  const ps4 = settingsPlatform === "ps4";
+  const rows = useMemo(
+    () => (ps4 ? (ps4Original && ps4Draft ? diffPs4(ps4Original, ps4Draft) : []) : original && draft ? diffSettings(original, draft, { devices }) : []),
+    [ps4, original, draft, ps4Original, ps4Draft, devices],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !saving && closeDiff();
@@ -30,7 +34,7 @@ export function SaveDiffModal() {
         <motion.div variants={itemVariants} className="px-7 pb-3 pt-6">
           <h2 className="text-[20px] font-semibold">Review changes</h2>
           <p className="mt-1 text-[13px] text-mute">
-            {rows.length} setting{rows.length === 1 ? "" : "s"} will be written to the emulator's config.
+            {rows.length} setting{rows.length === 1 ? "" : "s"} will be {ps4 ? "saved for the PS4 emulator" : "written to the emulator's config"}.
           </p>
         </motion.div>
 

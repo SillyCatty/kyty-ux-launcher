@@ -132,11 +132,13 @@ fn pump<R: Read + Send + 'static>(reader: R, sink: Arc<Mutex<Vec<String>>>) {
     });
 }
 
-/// Starts the emulator without any window of its own; only the game window appears.
+/// Starts the emulator program (`exe_name`, inside `emulator_dir`) without any window of its own;
+/// only the game window appears.
 pub fn spawn(
     app: AppHandle,
     running: Running,
     emulator_dir: &Path,
+    exe_name: &str,
     args: Vec<String>,
     info: RunningInfo,
     on_exit: impl FnOnce(ExitInfo) + Send + 'static,
@@ -146,7 +148,7 @@ pub fn spawn(
         return Err("A game is already running.".into());
     }
 
-    let exe: PathBuf = emulator_dir.join(EMULATOR_EXE);
+    let exe: PathBuf = emulator_dir.join(exe_name);
     let mut cmd = Command::new(&exe);
     cmd.args(&args)
         .current_dir(emulator_dir)
@@ -271,10 +273,10 @@ pub fn current(running: &Running) -> Option<RunningInfo> {
     running.lock().ok()?.as_ref().map(|g| g.info.clone())
 }
 
-/// First stdout line of a bare `kyty_emulator.exe` run, e.g.
+/// The version line printed by a bare run of the emulator program, e.g.
 /// `Release, clang-lld_link, ver = 0.3.0, git = b7a1fac, date = 2026.09.30`.
-pub fn version_line(emulator_dir: &Path) -> Option<String> {
-    let mut cmd = Command::new(emulator_dir.join(EMULATOR_EXE));
+pub fn version_line(emulator_dir: &Path, exe_name: &str) -> Option<String> {
+    let mut cmd = Command::new(emulator_dir.join(exe_name));
     cmd.current_dir(emulator_dir).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     #[cfg(windows)]
     {
@@ -294,8 +296,16 @@ pub fn version_line(emulator_dir: &Path) -> Option<String> {
     let _ = child.wait();
     out?.lines()
         .map(str::trim)
-        .find(|l| l.contains("git =") || l.contains("ver ="))
+        .find(|l| !l.starts_with("exe_name") && (l.contains("git =") || l.contains("ver =")))
         .map(str::to_owned)
+}
+
+/// The release tag matching a version line: dated for KytyPS5, the plain git tag (`v0.2.0`) for the PS4 emulator.
+pub fn release_tag_for(platform: crate::platform::Platform, line: &str) -> Option<String> {
+    match platform {
+        crate::platform::Platform::Ps5 => release_tag(line),
+        crate::platform::Platform::Ps4 => field(line, "git").filter(|g| !g.is_empty()).map(str::to_owned),
+    }
 }
 
 fn field<'a>(line: &'a str, name: &str) -> Option<&'a str> {
@@ -326,6 +336,14 @@ mod tests {
         let line = "Release, clang-lld_link, ver = 0.3.0, git = b7a1fac, date = 2026.09.30";
         assert_eq!(release_tag(line).as_deref(), Some("KytyPS5-2026-09-30-b7a1fac"));
         assert_eq!(semver(line).as_deref(), Some("0.3.0"));
+    }
+
+    #[test]
+    fn ps4_version_line_gives_the_plain_git_tag() {
+        let line = "Release, clang-lld-64, ver = 0.2.0, git = v0.2.0, lua = 5.2, date = 2022.08.18";
+        assert_eq!(release_tag_for(crate::platform::Platform::Ps4, line).as_deref(), Some("v0.2.0"));
+        assert_eq!(semver(line).as_deref(), Some("0.2.0"));
+        assert_eq!(release_tag_for(crate::platform::Platform::Ps5, line).as_deref(), Some("KytyPS5-2022-08-18-v0.2.0"));
     }
 
     #[test]

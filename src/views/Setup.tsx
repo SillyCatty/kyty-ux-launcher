@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { pickFolder } from "../lib/api";
+import { pickFolder, type Platform } from "../lib/api";
 import { CONSOLE_LANGUAGES, PRESENT_MODES, RESOLUTIONS, diffSettings, formatBytes, formatDate } from "../lib/fields";
 import { itemVariants, pageVariants, springBouncy, springSoft, tap } from "../lib/motion";
 import { useApp } from "../store/app";
@@ -8,7 +8,7 @@ import { Button, Progress, Row, Select, Stepper, TextField, Toggle, type Option 
 import { GameFolders, Lightbar, Segmented } from "../components/Shared";
 import { IconCheck, IconDownload, IconFolder, IconRefresh } from "../components/icons";
 
-const STEPS = ["Emulator", "Profile", "Graphics", "System", "Games", "Finish"];
+const STEPS = ["Emulator", "PS4", "Profile", "Graphics", "System", "Games", "Finish"];
 const byteLength = (s: string) => new TextEncoder().encode(s).length;
 
 const slide = {
@@ -62,31 +62,37 @@ function Progression({ step }: { step: number }) {
   );
 }
 
-function EmulatorStep() {
-  const {
-    emulatorDir, installs, emulatorInstall, defaultInstallDir, version,
-    adoptInstall, browseForEmulator, installEmulator, scanInstalls,
-  } = useApp();
+/** Finds, picks or installs one emulator. The PS4 one is optional, so it also offers a skip. */
+function EmulatorStep({ platform = "ps5" }: { platform?: Platform }) {
+  const app = useApp();
+  const ps4 = platform === "ps4";
+  const emulatorDir = ps4 ? app.ps4Dir : app.emulatorDir;
+  const installs = ps4 ? app.ps4Installs : app.installs;
+  const emulatorInstall = ps4 ? app.ps4Install : app.emulatorInstall;
+  const defaultInstallDir = ps4 ? app.defaultPs4InstallDir : app.defaultInstallDir;
+  const version = ps4 ? app.ps4Version : app.version;
+  const { adoptInstall, browseForEmulator, installEmulator, scanInstalls, skipPs4 } = app;
+  const name = ps4 ? "the PS4 emulator (Kyty)" : "KytyPS5";
   const [changing, setChanging] = useState(false);
   const [freshInstall, setFreshInstall] = useState(false);
   const [parent, setParent] = useState<string | null>(null);
-  const installPath = parent ? `${parent.replace(/[\\/]+$/, "")}\\KytyPS5` : defaultInstallDir;
+  const installPath = parent ? `${parent.replace(/[\\/]+$/, "")}\\${ps4 ? "KytyPS4" : "KytyPS5"}` : defaultInstallDir;
   const installing = emulatorInstall.status === "installing";
   const progress = emulatorInstall.progress;
   const pct = progress && progress.total > 0 ? progress.downloaded / progress.total : 0;
 
   const changeLocation = async () => {
-    const picked = await pickFolder("Choose where to install KytyPS5");
+    const picked = await pickFolder(`Choose where to install ${name}`);
     if (picked) setParent(picked);
   };
   const install = async () => {
-    if (await installEmulator(installPath)) setChanging(false);
+    if (await installEmulator(installPath, platform)) setChanging(false);
   };
 
   if (installing) {
     return (
       <>
-        <Heading title="Installing KytyPS5">Downloading the latest build in the background. Nothing will open and your browser isn't involved.</Heading>
+        <Heading title={`Installing ${name}`}>Downloading the latest build in the background. Nothing will open and your browser isn't involved.</Heading>
         <motion.div variants={itemVariants} className="flex flex-col gap-3 rounded-2xl border border-line bg-black/20 p-5">
           <div className="flex items-baseline justify-between text-[13px]">
             <span className="font-medium">{progress?.stage === "installing" ? "Installing…" : "Downloading…"}</span>
@@ -104,14 +110,19 @@ function EmulatorStep() {
   if (emulatorDir && !changing) {
     return (
       <>
-        <Heading title="KytyPS5 is ready">The launcher will use this copy of the emulator and its settings.</Heading>
+        <Heading title={ps4 ? "The PS4 emulator is ready" : "KytyPS5 is ready"}>
+          {ps4 ? "PS4 games in your game folders will launch with this copy of Kyty." : "The launcher will use this copy of the emulator and its settings."}
+        </Heading>
         <motion.div variants={itemVariants} className="flex items-center gap-4 rounded-2xl border border-good/30 bg-good/[0.06] p-5">
           <motion.span initial={{ scale: 0, rotate: -90 }} animate={{ scale: 1, rotate: 0 }} transition={springBouncy} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-good/20 text-good"><IconCheck width={22} height={22} /></motion.span>
           <div className="min-w-0 flex-1">
             <div className="truncate font-mono text-[12.5px]" title={emulatorDir}>{emulatorDir}</div>
             <div className="mt-0.5 text-[12px] text-mute">{version?.semver ? `Version ${version.semver} · ` : ""}{version?.tag ?? "Detected"}</div>
           </div>
-          <Button onClick={() => { setChanging(true); void scanInstalls(); }}>Change</Button>
+          <div className="flex shrink-0 gap-2">
+            <Button onClick={() => { setChanging(true); void scanInstalls(platform); }}>Change</Button>
+            {ps4 && <Button onClick={() => void skipPs4()}>Remove</Button>}
+          </div>
         </motion.div>
       </>
     );
@@ -120,7 +131,7 @@ function EmulatorStep() {
   if (installs === null) {
     return (
       <>
-        <Heading title="Looking for KytyPS5">Checking the usual places on this PC.</Heading>
+        <Heading title={ps4 ? "Looking for the PS4 emulator" : "Looking for KytyPS5"}>Checking the usual places on this PC.</Heading>
         <motion.div variants={itemVariants} className="flex items-center gap-3 text-[13px] text-mute"><Spinner /> Searching…</motion.div>
       </>
     );
@@ -129,13 +140,13 @@ function EmulatorStep() {
   if (installs.length > 0 && !freshInstall) {
     return (
       <>
-        <Heading title="We found KytyPS5">Pick the copy you want to use, or choose a different folder yourself.</Heading>
+        <Heading title={ps4 ? "We found the PS4 emulator" : "We found KytyPS5"}>Pick the copy you want to use, or choose a different folder yourself.</Heading>
         <motion.ul variants={itemVariants} className="flex flex-col gap-2.5">
           {installs.map((i) => (
             <motion.li key={i.path}>
               <motion.button
                 type="button" whileHover={{ x: 4 }} whileTap={tap} transition={springBouncy}
-                onClick={async () => { if (await adoptInstall(i.path)) setChanging(false); }}
+                onClick={async () => { if (await adoptInstall(i.path, platform)) setChanging(false); }}
                 className="flex w-full items-center gap-3.5 rounded-2xl border border-line bg-black/20 p-4 text-left transition-colors hover:border-accent/60 hover:bg-white/[0.04]"
               >
                 <IconFolder className="shrink-0 text-accent" />
@@ -149,7 +160,7 @@ function EmulatorStep() {
           ))}
         </motion.ul>
         <motion.div variants={itemVariants} className="mt-5 flex flex-wrap gap-2.5">
-          <Button onClick={() => void browseForEmulator().then(() => setChanging(false))}><IconFolder width={15} height={15} /> Choose another folder</Button>
+          <Button onClick={() => void browseForEmulator(platform).then(() => setChanging(false))}><IconFolder width={15} height={15} /> Choose another folder</Button>
           <Button onClick={() => setFreshInstall(true)}><IconDownload width={15} height={15} /> Download a fresh copy</Button>
         </motion.div>
       </>
@@ -158,8 +169,10 @@ function EmulatorStep() {
 
   return (
     <>
-      <Heading title="KytyPS5 wasn't found">
-        Install it automatically, or point me to a copy you already have. The download runs quietly in the background.
+      <Heading title={ps4 ? "PS4 emulator (optional)" : "KytyPS5 wasn't found"}>
+        {ps4
+          ? "Want to play PS4 games too? Install the original Kyty emulator automatically, or point me to a copy you already have. You can skip this and add it later."
+          : "Install it automatically, or point me to a copy you already have. The download runs quietly in the background."}
       </Heading>
       <motion.div variants={itemVariants} className="flex flex-col gap-4 rounded-2xl border border-line bg-black/20 p-5">
         <div className="flex items-center gap-4">
@@ -172,12 +185,12 @@ function EmulatorStep() {
         </div>
         {emulatorInstall.status === "error" && <div className="rounded-xl bg-bad/10 px-3.5 py-2.5 text-[12.5px] text-bad">{emulatorInstall.error}</div>}
         <Button variant="primary" onClick={() => void install()} className="!h-11 !text-[14px]">
-          <IconDownload width={16} height={16} /> {emulatorInstall.status === "error" ? "Try again" : "Install KytyPS5"}
+          <IconDownload width={16} height={16} /> {emulatorInstall.status === "error" ? "Try again" : ps4 ? "Install the PS4 emulator" : "Install KytyPS5"}
         </Button>
       </motion.div>
-      <motion.div variants={itemVariants} className="mt-4 flex items-center gap-3 text-[13px] text-mute">
+      <motion.div variants={itemVariants} className="mt-4 flex flex-wrap items-center gap-3 text-[13px] text-mute">
         Already have it?
-        <Button onClick={() => void browseForEmulator().then(() => setChanging(false))}><IconFolder width={15} height={15} /> Choose its folder</Button>
+        <Button onClick={() => void browseForEmulator(platform).then(() => setChanging(false))}><IconFolder width={15} height={15} /> Choose its folder</Button>
         {installs.length > 0 && <button type="button" onClick={() => setFreshInstall(false)} className="text-accent hover:underline">Back to detected copies</button>}
       </motion.div>
     </>
@@ -292,12 +305,13 @@ function GamesStep() {
 }
 
 function FinishStep() {
-  const { emulatorDir, draft, original, devices, version } = useApp();
+  const { emulatorDir, draft, original, devices, version, ps4Dir, ps4Version } = useApp();
   const changes = useMemo(() => (original && draft ? diffSettings(original, draft, { devices }).length : 0), [original, draft, devices]);
   if (!draft) return null;
   const gpu = draft.gpu_index < 0 ? "Automatic" : (devices?.gpus[draft.gpu_index] ?? `GPU ${draft.gpu_index}`);
   const rows: [string, string][] = [
     ["Emulator", `${emulatorDir ?? ""}${version?.semver ? `  (v${version.semver})` : ""}`],
+    ["PS4 emulator", ps4Dir ? `${ps4Dir}${ps4Version?.semver ? `  (v${ps4Version.semver})` : ""}` : "Not set up (PS4 games won't launch)"],
     ["Profile", `${draft.user_name} · ID ${draft.user_id} · ${CONSOLE_LANGUAGES[draft.console_language]}`],
     ["Graphics", `${gpu} · ${draft.screen_resolution} · ${draft.present_mode}${draft.fullscreen_enabled ? " · fullscreen" : ""}`],
     ["System", `AMD CPU patch ${draft.amd_cpu_enabled ? "on" : "off"} · mic ${draft.audio_input_device || "none"}`],
@@ -322,21 +336,27 @@ function FinishStep() {
 }
 
 export function SetupView() {
-  const { emulatorDir, draft, finishSetup, saving, emulatorInstall } = useApp();
+  const { emulatorDir, draft, finishSetup, saving, emulatorInstall, ps4Install, ps4Dir } = useApp();
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(1);
 
   const nameBytes = draft ? byteLength(draft.user_name) : 0;
   const profileValid = !!draft && nameBytes >= 1 && nameBytes <= 16 && draft.user_id !== 254 && draft.user_id !== 255;
-  const canNext = step === 0 ? !!emulatorDir && emulatorInstall.status !== "installing" : step === 1 ? profileValid : true;
+  const canNext =
+    step === 0 ? !!emulatorDir && emulatorInstall.status !== "installing" : step === 1 ? ps4Install.status !== "installing" : step === 2 ? profileValid : true;
   const last = step === STEPS.length - 1;
+  // On the optional PS4 step the button says "Skip" until an emulator is chosen or installed.
+  const skipsPs4 = step === 1 && !ps4Dir && ps4Install.status !== "installing";
 
   const go = (next: number) => {
     setDirection(next > step ? 1 : -1);
     setStep(next);
   };
 
-  const body = [<EmulatorStep key="0" />, <ProfileStep key="1" />, <GraphicsStep key="2" />, <SystemStep key="3" />, <GamesStep key="4" />, <FinishStep key="5" />][step];
+  const body = [
+    <EmulatorStep key="0" />, <EmulatorStep key="ps4" platform="ps4" />, <ProfileStep key="2" />, <GraphicsStep key="3" />,
+    <SystemStep key="4" />, <GamesStep key="5" />, <FinishStep key="6" />,
+  ][step];
 
   return (
     <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit" className="grid h-full place-items-center px-8 pb-6">
@@ -361,7 +381,7 @@ export function SetupView() {
           {last ? (
             <Button variant="primary" disabled={saving || !profileValid} onClick={() => void finishSetup()} className="!h-10 !px-8">{saving ? "Saving…" : "Finish setup"}</Button>
           ) : (
-            <Button variant="primary" disabled={!canNext} onClick={() => go(step + 1)} className="!h-10 !px-8">Continue</Button>
+            <Button variant="primary" disabled={!canNext} onClick={() => go(step + 1)} className="!h-10 !px-8">{skipsPs4 ? "Skip" : "Continue"}</Button>
           )}
         </div>
       </div>

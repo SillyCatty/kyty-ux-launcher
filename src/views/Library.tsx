@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { imageSrc, type Game } from "../lib/api";
+import { api, errorText, imageSrc, type Game, type GameModules } from "../lib/api";
 import { formatDate, formatPlayTime } from "../lib/fields";
 import { backdropVariants, gridVariants, hoverLift, itemVariants, modalVariants, pageVariants, smooth, springBouncy, springSnappy, tap } from "../lib/motion";
 import { useApp } from "../store/app";
 import { Button, Select } from "../components/ui";
+import { Segmented } from "../components/Shared";
 import { IconFolder, IconGamepad, IconPackage, IconPlay, IconPlus, IconRefresh, IconSearch, IconStop, IconTrash, IconClose, IconSettings } from "../components/icons";
 
 type Sort = "name" | "recent" | "playtime";
@@ -23,9 +24,19 @@ function Cover({ game, className = "" }: { game: Game; className?: string }) {
   );
 }
 
-function GameCard({ game }: { game: Game }) {
-  const { selectGame, launch, running } = useApp();
+/** Small PS4/PS5 tag, shown once both platforms are in use. */
+function PlatformChip({ platform, className = "" }: { platform: Game["platform"]; className?: string }) {
+  return (
+    <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide backdrop-blur ${platform === "ps4" ? "bg-accent-2/25 text-accent-2" : "bg-accent/30 text-white"} ${className}`}>
+      {platform === "ps4" ? "PS4" : "PS5"}
+    </span>
+  );
+}
+
+function GameCard({ game, showPlatform }: { game: Game; showPlatform: boolean }) {
+  const { selectGame, launch, running, ps4Dir } = useApp();
   const isRunning = running?.game_id === game.id;
+  const needsPs4 = game.platform === "ps4" && !ps4Dir;
   return (
     <motion.article
       variants={itemVariants} whileHover={hoverLift} whileTap={{ scale: 0.98 }} transition={springBouncy}
@@ -46,8 +57,9 @@ function GameCard({ game }: { game: Game }) {
             <IconSettings width={13} height={13} />
           </span>
         )}
+        {showPlatform && <PlatformChip platform={game.platform} className="absolute bottom-2.5 left-2.5" />}
         <button
-          aria-label={`Play ${game.name}`} disabled={!!running}
+          aria-label={`Play ${game.name}`} disabled={!!running || needsPs4}
           onClick={(e) => { e.stopPropagation(); void launch(game.id); }}
           className="btn-primary absolute bottom-3 right-3 grid h-11 w-11 translate-y-3 scale-75 place-items-center rounded-full opacity-0 transition-all duration-300 ease-[cubic-bezier(.34,1.56,.64,1)] group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100 hover:!scale-110 active:!scale-95 disabled:hidden"
         >
@@ -70,10 +82,73 @@ function Spinner({ spinning }: { spinning: boolean }) {
   );
 }
 
+/** Which modules of a PS4 game the emulator loads. Most games only need eboot.bin. */
+function ModulesPicker({ game }: { game: Game }) {
+  const { toast } = useApp();
+  const [modules, setModules] = useState<GameModules | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.getGameModules(game.id).then((m) => alive && setModules(m)).catch(() => alive && setModules({ available: [], selected: [] }));
+    return () => { alive = false; };
+  }, [game.id]);
+
+  if (!modules) return null;
+  const toggle = async (module: string) => {
+    const selected = modules.selected.includes(module) ? modules.selected.filter((m) => m !== module) : [...modules.selected, module];
+    const previous = modules;
+    setModules({ ...modules, selected });
+    try {
+      await api.setGameModules(game.id, selected);
+    } catch (e) {
+      setModules(previous);
+      toast("error", errorText(e));
+    }
+  };
+
+  return (
+    <motion.div variants={itemVariants} className="rounded-xl border border-line bg-black/20">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center justify-between px-3.5 py-2.5 text-left">
+        <span>
+          <span className="block text-[10.5px] font-semibold uppercase tracking-wider text-mute">Modules to load</span>
+          <span className="text-[13px]">{modules.selected.length || "None"} of {modules.available.length} selected</span>
+        </span>
+        <motion.span animate={{ rotate: open ? 180 : 0 }} transition={springBouncy} className="text-mute">
+          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 4.5 6 8.5 10 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </motion.span>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+            transition={{ opacity: { duration: 0.15 }, height: springBouncy }} className="overflow-hidden"
+          >
+            <p className="px-3.5 pb-2 text-[11.5px] leading-relaxed text-mute">
+              Most games only need <span className="font-mono">eboot.bin</span>. Add game-specific modules only if a game needs them; Kyty emulates the system libraries itself.
+            </p>
+            <ul className="no-scrollbar max-h-44 overflow-y-auto px-2 pb-2">
+              {modules.available.map((m) => (
+                <li key={m}>
+                  <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-[12.5px] hover:bg-white/[0.05]">
+                    <input type="checkbox" checked={modules.selected.includes(m)} onChange={() => void toggle(m)} className="h-3.5 w-3.5 accent-[#7c8cff]" />
+                    <span className="truncate font-mono">{m}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
 function GameDetail({ game }: { game: Game }) {
-  const { selectGame, launch, stop, running, logs, setView } = useApp();
+  const { selectGame, launch, stop, running, logs, setView, ps4Dir, setSettingsPlatform } = useApp();
   const isRunning = running?.game_id === game.id;
   const busyElsewhere = !!running && !isRunning;
+  const needsPs4 = game.platform === "ps4" && !ps4Dir;
   const logRef = useRef<HTMLDivElement>(null);
   const close = () => selectGame(null);
 
@@ -116,7 +191,10 @@ function GameDetail({ game }: { game: Game }) {
               <Cover game={game} />
             </motion.div>
             <div className="min-w-0 flex-1 pb-1">
-              <h2 className="truncate text-[26px] font-semibold leading-tight">{game.name}</h2>
+              <h2 className="flex items-center gap-3 text-[26px] font-semibold leading-tight">
+                <span className="truncate">{game.name}</span>
+                <PlatformChip platform={game.platform} className="shrink-0 !text-[11px]" />
+              </h2>
               <div className="mt-1 truncate font-mono text-[11.5px] text-mute" title={game.path}>{game.path}</div>
             </div>
           </motion.div>
@@ -127,12 +205,13 @@ function GameDetail({ game }: { game: Game }) {
             {isRunning ? (
               <Button variant="danger" onClick={stop} className="!h-11 !px-7"><IconStop width={14} height={14} /> Stop game</Button>
             ) : (
-              <Button variant="primary" disabled={busyElsewhere} onClick={() => void launch(game.id)} className="!h-11 !px-8 !text-[14px]">
+              <Button variant="primary" disabled={busyElsewhere || needsPs4} onClick={() => void launch(game.id)} className="!h-11 !px-8 !text-[14px]">
                 <IconPlay width={16} height={16} /> Play
               </Button>
             )}
             {busyElsewhere && <span className="text-[12px] text-mute">Another game is running.</span>}
-            <Button onClick={() => { selectGame(null); setView("settings"); }}><IconSettings width={15} height={15} /> Emulator settings</Button>
+            {needsPs4 && <span className="text-[12px] text-warn">Set up the PS4 emulator first (Settings, then Run setup again).</span>}
+            <Button onClick={() => { setSettingsPlatform(game.platform); selectGame(null); setView("settings"); }}><IconSettings width={15} height={15} /> Emulator settings</Button>
           </motion.div>
 
           <motion.dl variants={itemVariants} className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -143,6 +222,8 @@ function GameDetail({ game }: { game: Game }) {
               </div>
             ))}
           </motion.dl>
+
+          {game.platform === "ps4" && <ModulesPicker game={game} />}
 
           <AnimatePresence>
             {isRunning && (
@@ -244,20 +325,25 @@ function FolderMenu() {
 }
 
 export function LibraryView() {
-  const { games, gamesLoading, refreshGames, selectedGameId, setView } = useApp();
+  const { games, gamesLoading, refreshGames, selectedGameId, setView, platformFilter, setPlatformFilter, ps4Dir } = useApp();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("name");
+  // Platform tags and the filter only appear once PS4 is actually in play.
+  const hasPs4 = !!ps4Dir || games.some((g) => g.platform === "ps4");
+  const filter = hasPs4 ? platformFilter : "all";
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = games.filter((g) => !q || g.name.toLowerCase().includes(q) || g.title_id.toLowerCase().includes(q));
+    const list = games.filter(
+      (g) => (filter === "all" || g.platform === filter) && (!q || g.name.toLowerCase().includes(q) || g.title_id.toLowerCase().includes(q)),
+    );
     const by: Record<Sort, (a: Game, b: Game) => number> = {
       name: (a, b) => a.name.localeCompare(b.name),
       recent: (a, b) => (b.last_played ?? 0) - (a.last_played ?? 0),
       playtime: (a, b) => b.play_seconds - a.play_seconds,
     };
     return [...list].sort(by[sort]);
-  }, [games, query, sort]);
+  }, [games, query, sort, filter]);
 
   const selected = games.find((g) => g.id === selectedGameId) ?? null;
 
@@ -269,6 +355,14 @@ export function LibraryView() {
           <p className="text-[13px] text-mute">{games.length} game{games.length === 1 ? "" : "s"} found in your game folders</p>
         </div>
         <div className="flex items-center gap-2.5">
+          {hasPs4 && (
+            <div className="w-56">
+              <Segmented<"all" | "ps5" | "ps4">
+                value={filter} onChange={setPlatformFilter}
+                options={[{ value: "all", label: "All" }, { value: "ps5", label: "PS5" }, { value: "ps4", label: "PS4" }]}
+              />
+            </div>
+          )}
           <label className="field flex h-9 w-60 items-center gap-2 px-3 text-mute focus-within:!border-accent">
             <IconSearch width={15} height={15} />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search games" className="w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-mute" />
@@ -282,8 +376,8 @@ export function LibraryView() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-24">
         {shown.length > 0 ? (
-          <motion.div variants={gridVariants} initial="initial" animate="animate" key={`${query}-${sort}`} className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-x-5 gap-y-7 pt-2">
-            {shown.map((g) => <GameCard key={g.id} game={g} />)}
+          <motion.div variants={gridVariants} initial="initial" animate="animate" key={`${query}-${sort}-${filter}`} className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-x-5 gap-y-7 pt-2">
+            {shown.map((g) => <GameCard key={g.id} game={g} showPlatform={hasPs4} />)}
           </motion.div>
         ) : (
           <motion.div variants={itemVariants} className="mx-auto mt-16 flex max-w-sm flex-col items-center gap-4 text-center">
@@ -292,7 +386,7 @@ export function LibraryView() {
             </motion.div>
             <div className="text-[17px] font-semibold">{games.length ? "No games match your search" : "No games yet"}</div>
             <p className="text-[13px] text-mute">
-              {games.length ? "Try a different name or title ID." : "Add a folder that contains your PS5 games (each game folder holds an eboot.bin)."}
+              {games.length ? "Try a different name, title ID or platform filter." : "Add a folder that contains your games (each game folder holds an eboot.bin)."}
             </p>
             {!games.length && <Button variant="primary" onClick={() => setView("settings")}>Add a game folder</Button>}
           </motion.div>

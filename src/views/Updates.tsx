@@ -121,6 +121,85 @@ function LauncherSection() {
   );
 }
 
+/** Shown before the PS4 emulator exists: one click installs it quietly from its GitHub release. */
+function Ps4Missing() {
+  const { ps4Install, installEmulator, browseForEmulator, defaultPs4InstallDir, running, toast } = useApp();
+  const installing = ps4Install.status === "installing";
+  const progress = ps4Install.progress;
+  const pct = progress && progress.total > 0 ? progress.downloaded / progress.total : 0;
+
+  const install = async () => {
+    if (await installEmulator(undefined, "ps4")) toast("success", "The PS4 emulator was installed.");
+  };
+
+  return (
+    <Section title="PS4 emulator (Kyty)">
+      <div className="flex flex-wrap items-center justify-between gap-4 px-2 py-1">
+        <div className="min-w-0">
+          <div className="text-[18px] font-semibold">Not installed</div>
+          <div className="mt-0.5 max-w-[520px] text-[12.5px] leading-relaxed text-mute">
+            Download the original Kyty emulator to play PS4 games. It installs quietly to <span className="font-mono text-[11.5px]">{defaultPs4InstallDir}</span>; nothing opens in your browser.
+          </div>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="primary" disabled={installing || !!running} onClick={() => void install()}><IconDownload width={15} height={15} /> Download &amp; install</Button>
+          <Button disabled={installing} onClick={() => void browseForEmulator("ps4")}>Choose folder</Button>
+        </div>
+      </div>
+      {running && <p className="px-2 text-[12px] text-warn">Close the running game before installing.</p>}
+      {ps4Install.status === "error" && <p className="px-2 text-[12.5px] text-bad">{ps4Install.error}</p>}
+      {installing && (
+        <div className="mx-2 mt-1 flex flex-col gap-2">
+          <div className="flex items-baseline justify-between text-[12.5px]">
+            <span className="font-medium">{progress?.stage === "installing" ? "Installing…" : "Downloading…"}</span>
+            {progress?.stage === "downloading" && progress.total > 0 && (
+              <span className="font-mono text-[11.5px] text-mute">{formatBytes(progress.downloaded)} / {formatBytes(progress.total)}</span>
+            )}
+          </div>
+          <Progress value={pct} indeterminate={progress?.stage === "installing" || !progress || progress.total === 0} />
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function Ps4Section() {
+  const { ps4Dir, ps4Version, ps4Update: u, checkPs4Update, installPs4Update, running } = useApp();
+  if (!ps4Dir) return <Ps4Missing />;
+  const busy = u.status === "checking" || u.status === "installing";
+  const pct = u.progress && u.progress.total > 0 ? u.progress.downloaded / u.progress.total : 0;
+  const line = {
+    idle: "Not checked yet.",
+    checking: "Checking GitHub for the latest release…",
+    uptodate: `You have the latest release${u.info ? ` (${u.info.latest_tag})` : ""}.`,
+    available: u.info ? `${u.info.latest_tag} is available${u.info.asset_size ? ` (${formatBytes(u.info.asset_size)})` : ""}.` : "An update is available.",
+    installing: u.progress?.stage === "installing" ? "Installing…" : "Downloading the update…",
+    done: "Updated.",
+    error: u.error ?? "Couldn't check for updates.",
+  }[u.status];
+
+  return (
+    <Section title="PS4 emulator (Kyty)">
+      <div className="flex flex-wrap items-center justify-between gap-4 px-2 py-1">
+        <div className="min-w-0">
+          <div className="text-[18px] font-semibold">Kyty {ps4Version?.semver ?? ""}</div>
+          <div className="font-mono text-[11.5px] text-mute">{ps4Version?.tag ?? "version unknown"}</div>
+          <div className={`mt-1 text-[12.5px] ${u.status === "error" ? "text-bad" : u.status === "available" ? "text-accent" : "text-mute"}`}>{line}</div>
+        </div>
+        {u.status === "available" ? (
+          <Button variant="primary" disabled={!!running} onClick={() => void installPs4Update()}><IconDownload width={15} height={15} /> Install update</Button>
+        ) : (
+          <Button disabled={busy} onClick={() => void checkPs4Update(true)}><IconRefresh width={15} height={15} /> Check for updates</Button>
+        )}
+      </div>
+      {u.status === "available" && running && <p className="px-2 text-[12px] text-warn">Close the running game before updating.</p>}
+      {u.status === "installing" && (
+        <div className="mx-2 mt-1"><Progress value={pct} indeterminate={u.progress?.stage === "installing" || !u.progress || u.progress.total === 0} /></div>
+      )}
+    </Section>
+  );
+}
+
 export function UpdatesView() {
   const { version, repo, autoCheck, savePrefs, checkUpdate, update } = useApp();
   const [repoText, setRepoText] = useState(repo);
@@ -149,6 +228,8 @@ export function UpdatesView() {
         <Section title="Latest release">
           <div className="px-2 py-1"><StatusCard /></div>
         </Section>
+
+        <Ps4Section />
 
         <Section title="Source">
           <div className="flex items-center gap-3 px-2 py-1">

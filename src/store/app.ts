@@ -1,11 +1,12 @@
 import { create } from "zustand";
 import {
   api, errorText, launcherApi, on, pickFile, pickFolder,
-  type ConverterConfig, type ConvertDone, type Devices, type ExitInfo, type Game, type Install, type LauncherUpdate, type RunningInfo, type Settings, type UpdateInfo, type UpdateProgress, type Version,
+  type ConverterConfig, type ConvertDone, type Devices, type ExitInfo, type Game, type Install, type LauncherUpdate, type Platform, type Ps4Settings, type RunningInfo, type Settings, type UpdateInfo, type UpdateProgress, type Version,
 } from "../lib/api";
-import { DEFAULT_SETTINGS } from "../lib/fields";
+import { DEFAULT_PS4_SETTINGS, DEFAULT_SETTINGS } from "../lib/fields";
 
 export type View = "library" | "settings" | "updates";
+export type PlatformFilter = "all" | Platform;
 export type Boot = "loading" | "setup" | "ready";
 export interface Toast { id: number; kind: "info" | "success" | "error"; text: string }
 export interface UpdateState {
@@ -46,6 +47,17 @@ interface AppState {
   version: Version | null;
   configPath: string;
 
+  ps4Dir: string | null;
+  defaultPs4InstallDir: string;
+  ps4Installs: Install[] | null;
+  ps4Install: EmulatorInstall;
+  ps4Version: Version | null;
+  ps4Original: Ps4Settings | null;
+  ps4Draft: Ps4Settings | null;
+  ps4Update: UpdateState;
+  platformFilter: PlatformFilter;
+  settingsPlatform: Platform;
+
   games: Game[];
   gamesLoading: boolean;
   selectedGameId: string | null;
@@ -70,10 +82,17 @@ interface AppState {
   init: () => Promise<void>;
   checkLauncherUpdate: (manual: boolean) => Promise<void>;
   installLauncherUpdate: () => Promise<void>;
-  scanInstalls: () => Promise<void>;
-  adoptInstall: (path: string) => Promise<boolean>;
-  browseForEmulator: () => Promise<void>;
-  installEmulator: (dir?: string) => Promise<boolean>;
+  scanInstalls: (platform?: Platform) => Promise<void>;
+  adoptInstall: (path: string, platform?: Platform) => Promise<boolean>;
+  browseForEmulator: (platform?: Platform) => Promise<void>;
+  installEmulator: (dir?: string, platform?: Platform) => Promise<boolean>;
+  skipPs4: () => Promise<void>;
+  setPlatformFilter: (filter: PlatformFilter) => void;
+  setSettingsPlatform: (platform: Platform) => void;
+  patchPs4Draft: (patch: Partial<Ps4Settings>) => void;
+  resetPs4Defaults: () => void;
+  checkPs4Update: (manual: boolean) => Promise<void>;
+  installPs4Update: () => Promise<void>;
   finishSetup: () => Promise<void>;
   rerunSetup: () => Promise<void>;
   setView: (view: View) => void;
@@ -116,6 +135,12 @@ export const useApp = create<AppState>((set, get) => {
     set({ original: loaded.settings, draft, configPath: loaded.config_path, devices, games, version, converter });
   };
 
+  /** Loads the PS4 emulator's settings (kept by the launcher) and version. */
+  const loadPs4Data = async () => {
+    const [settings, version] = await Promise.all([api.getPs4Settings(), api.getVersion("ps4")]);
+    set({ ps4Original: settings, ps4Draft: settings, ps4Version: version });
+  };
+
   /** Saves only the folder list right away; other unsaved edits in Settings stay as drafts. */
   const persistFolders = async (next: string[], message: string) => {
     const { original, draft } = get();
@@ -141,6 +166,16 @@ export const useApp = create<AppState>((set, get) => {
     autoCheck: true,
     version: null,
     configPath: "",
+    ps4Dir: null,
+    defaultPs4InstallDir: "",
+    ps4Installs: null,
+    ps4Install: { status: "idle" },
+    ps4Version: null,
+    ps4Original: null,
+    ps4Draft: null,
+    ps4Update: { status: "idle" },
+    platformFilter: "all",
+    settingsPlatform: "ps5",
     games: [],
     gamesLoading: false,
     selectedGameId: null,
@@ -190,7 +225,9 @@ export const useApp = create<AppState>((set, get) => {
         await on<UpdateProgress>("update-progress", (progress) =>
           set((s) => ({
             update: s.update.status === "installing" ? { ...s.update, progress } : s.update,
+            ps4Update: s.ps4Update.status === "installing" ? { ...s.ps4Update, progress } : s.ps4Update,
             emulatorInstall: s.emulatorInstall.status === "installing" ? { ...s.emulatorInstall, progress } : s.emulatorInstall,
+            ps4Install: s.ps4Install.status === "installing" ? { ...s.ps4Install, progress } : s.ps4Install,
           })),
         );
       }
@@ -200,18 +237,22 @@ export const useApp = create<AppState>((set, get) => {
         set({
           emulatorDir: snap.emulator_dir, repo: snap.repo, autoCheck: snap.auto_check_updates,
           running: snap.running, defaultInstallDir: snap.default_install_dir,
+          ps4Dir: snap.ps4_dir, defaultPs4InstallDir: snap.default_ps4_install_dir,
         });
         void launcherApi.version().then((launcherVersion) => set({ launcherVersion }));
         if (snap.emulator_dir) await loadEmulatorData();
+        if (snap.ps4_dir) await loadPs4Data();
         if (!snap.emulator_dir || !snap.setup_complete) {
           set({ boot: "setup" });
           void get().scanInstalls();
+          void get().scanInstalls("ps4");
           return;
         }
         set({ boot: "ready" });
         if (snap.auto_check_updates) {
           void get().checkUpdate(false);
           void get().checkLauncherUpdate(false);
+          if (snap.ps4_dir) void get().checkPs4Update(false);
         }
       } catch (e) {
         set({ boot: "setup" });
@@ -256,20 +297,26 @@ export const useApp = create<AppState>((set, get) => {
       }
     },
 
-    scanInstalls: async () => {
-      set({ installs: null });
+    scanInstalls: async (platform = "ps5") => {
+      const key = platform === "ps4" ? "ps4Installs" : "installs";
+      set({ [key]: null });
       try {
-        set({ installs: await api.findInstalls() });
+        set({ [key]: await api.findInstalls(platform) });
       } catch {
-        set({ installs: [] });
+        set({ [key]: [] });
       }
     },
 
-    adoptInstall: async (path) => {
+    adoptInstall: async (path, platform = "ps5") => {
       try {
-        await api.setEmulatorDir(path);
-        set({ emulatorDir: path });
-        await loadEmulatorData();
+        await api.setEmulatorDir(path, platform);
+        if (platform === "ps4") {
+          set({ ps4Dir: path });
+          await loadPs4Data();
+        } else {
+          set({ emulatorDir: path });
+          await loadEmulatorData();
+        }
         return true;
       } catch (e) {
         get().toast("error", errorText(e));
@@ -277,20 +324,61 @@ export const useApp = create<AppState>((set, get) => {
       }
     },
 
-    browseForEmulator: async () => {
-      const dir = await pickFolder("Select the folder that contains kyty_emulator.exe");
-      if (dir) await get().adoptInstall(dir);
+    browseForEmulator: async (platform = "ps5") => {
+      const dir = await pickFolder(`Select the folder that contains ${platform === "ps4" ? "fc_script.exe" : "kyty_emulator.exe"}`);
+      if (dir) await get().adoptInstall(dir, platform);
     },
 
-    installEmulator: async (dir) => {
-      set({ emulatorInstall: { status: "installing", progress: { stage: "downloading", downloaded: 0, total: 0 } } });
+    installEmulator: async (dir, platform = "ps5") => {
+      const key = platform === "ps4" ? "ps4Install" : "emulatorInstall";
+      set({ [key]: { status: "installing", progress: { stage: "downloading", downloaded: 0, total: 0 } } });
       try {
-        const path = await api.installEmulator(dir);
-        set({ emulatorInstall: { status: "idle" } });
-        return await get().adoptInstall(path);
+        const path = await api.installEmulator(dir, platform);
+        set({ [key]: { status: "idle" } });
+        return await get().adoptInstall(path, platform);
       } catch (e) {
-        set({ emulatorInstall: { status: "error", error: errorText(e) } });
+        set({ [key]: { status: "error", error: errorText(e) } });
         return false;
+      }
+    },
+
+    /** Stop using the PS4 emulator. Nothing is deleted from disk. */
+    skipPs4: async () => {
+      try {
+        await api.clearPs4();
+        set({ ps4Dir: null, ps4Version: null, ps4Original: null, ps4Draft: null, ps4Update: { status: "idle" }, platformFilter: "all", settingsPlatform: "ps5" });
+      } catch (e) {
+        get().toast("error", errorText(e));
+      }
+    },
+
+    setPlatformFilter: (platformFilter) => set({ platformFilter }),
+    setSettingsPlatform: (settingsPlatform) => set({ settingsPlatform }),
+    patchPs4Draft: (patch) => set((s) => (s.ps4Draft ? { ps4Draft: { ...s.ps4Draft, ...patch } } : {})),
+    resetPs4Defaults: () => set({ ps4Draft: { ...DEFAULT_PS4_SETTINGS } }),
+
+    checkPs4Update: async (manual) => {
+      set({ ps4Update: { status: "checking" } });
+      try {
+        const info = await api.checkUpdate("ps4");
+        set({ ps4Update: { status: info.update_available ? "available" : "uptodate", info } });
+        if (info.update_available && !manual) get().toast("info", `PS4 emulator update available: ${info.latest_tag}`);
+      } catch (e) {
+        set({ ps4Update: { status: "error", error: errorText(e) } });
+        if (manual) get().toast("error", errorText(e));
+      }
+    },
+
+    installPs4Update: async () => {
+      const info = get().ps4Update.info;
+      set({ ps4Update: { status: "installing", info, progress: { stage: "downloading", downloaded: 0, total: info?.asset_size ?? 0 } } });
+      try {
+        const version = await api.installUpdate("ps4");
+        set({ ps4Version: version, ps4Update: { status: "done", info } });
+        get().toast("success", "The PS4 emulator was updated.");
+      } catch (e) {
+        set({ ps4Update: { status: "error", info, error: errorText(e) } });
+        get().toast("error", errorText(e));
       }
     },
 
@@ -317,6 +405,7 @@ export const useApp = create<AppState>((set, get) => {
         await api.resetSetup();
         set({ boot: "setup", selectedGameId: null });
         void get().scanInstalls();
+        void get().scanInstalls("ps4");
       } catch (e) {
         get().toast("error", errorText(e));
       }
@@ -441,9 +530,25 @@ export const useApp = create<AppState>((set, get) => {
 
     openDiff: () => set({ diffOpen: true }),
     closeDiff: () => set({ diffOpen: false }),
-    cancelChanges: () => set((s) => ({ draft: s.original, diffOpen: false })),
+    cancelChanges: () =>
+      set((s) => (s.settingsPlatform === "ps4" ? { ps4Draft: s.ps4Original, diffOpen: false } : { draft: s.original, diffOpen: false })),
 
     saveChanges: async () => {
+      if (get().settingsPlatform === "ps4") {
+        const { ps4Draft } = get();
+        if (!ps4Draft) return;
+        set({ saving: true });
+        try {
+          const changed = await api.savePs4Settings(ps4Draft);
+          set({ ps4Original: ps4Draft, diffOpen: false });
+          get().toast("success", changed.length ? `Saved ${changed.length} PS4 change${changed.length === 1 ? "" : "s"}.` : "Nothing to save.");
+        } catch (e) {
+          get().toast("error", errorText(e));
+        } finally {
+          set({ saving: false });
+        }
+        return;
+      }
       const { draft, original } = get();
       if (!draft || !original) return;
       set({ saving: true });

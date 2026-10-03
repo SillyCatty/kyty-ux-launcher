@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "../lib/api";
-import { diffSettings } from "../lib/fields";
+import { diffPs4, diffSettings } from "../lib/fields";
 import { spring, springBouncy, tap, toastVariants } from "../lib/motion";
 import { useApp, type View } from "../store/app";
 import { IconCheck, IconClose, IconDownload, IconLibrary, IconMax, IconMin, IconSettings, IconStop } from "./icons";
@@ -33,8 +33,13 @@ const NAV: { view: View; label: string; icon: typeof IconLibrary }[] = [
 
 export function Sidebar() {
   const { view, setView, running, stop, update, launcherUpdate, original, draft, devices, version, selectGame, games } = useApp();
-  const dirty = useMemo(() => (original && draft ? diffSettings(original, draft, { devices }).length : 0), [original, draft, devices]);
-  const badge = (v: View) => (v === "settings" && dirty > 0 ? dirty : v === "updates" && (update.status === "available" || launcherUpdate.status === "available") ? "new" : null);
+  const { ps4Original, ps4Draft, ps4Update } = useApp();
+  const dirty = useMemo(
+    () => (original && draft ? diffSettings(original, draft, { devices }).length : 0) + (ps4Original && ps4Draft ? diffPs4(ps4Original, ps4Draft).length : 0),
+    [original, draft, devices, ps4Original, ps4Draft],
+  );
+  const anyUpdate = update.status === "available" || launcherUpdate.status === "available" || ps4Update.status === "available";
+  const badge = (v: View) => (v === "settings" && dirty > 0 ? dirty : v === "updates" && anyUpdate ? "new" : null);
   const runningGame = games.find((g) => g.id === running?.game_id);
 
   return (

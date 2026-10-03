@@ -1,17 +1,102 @@
 import { useMemo } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  CONSOLE_LANGUAGES, LOG_DIRECTIONS, PRESENT_MODES, RESOLUTIONS, SHADER_OPTIMIZATIONS, diffSettings,
+  CONSOLE_LANGUAGES, LOG_DIRECTIONS, PRESENT_MODES, PROFILER_DIRECTIONS, PS4_RESOLUTIONS, RESOLUTIONS, SHADER_OPTIMIZATIONS, diffPs4, diffSettings,
 } from "../lib/fields";
 import { itemVariants, pageVariants } from "../lib/motion";
 import { useApp } from "../store/app";
 import { Button, Row, Section, Select, Stepper, TextField, Toggle, type Option } from "../components/ui";
-import { GameFolders, Lightbar } from "../components/Shared";
+import { GameFolders, Lightbar, Segmented } from "../components/Shared";
 
 const opts = (list: string[]): Option<string>[] => list.map((v) => ({ value: v, label: v }));
 const byteLength = (s: string) => new TextEncoder().encode(s).length;
 
+/** PS5 | PS4 switch, shown once the PS4 emulator is set up. */
+function PlatformSwitch() {
+  const { ps4Dir, settingsPlatform, setSettingsPlatform } = useApp();
+  if (!ps4Dir) return null;
+  return (
+    <div className="w-44">
+      <Segmented<"ps5" | "ps4">
+        value={settingsPlatform} onChange={setSettingsPlatform}
+        options={[{ value: "ps5", label: "PS5" }, { value: "ps4", label: "PS4" }]}
+      />
+    </div>
+  );
+}
+
 export function SettingsView() {
+  const { settingsPlatform, ps4Dir } = useApp();
+  return ps4Dir && settingsPlatform === "ps4" ? <Ps4Settings /> : <Ps5Settings />;
+}
+
+function Ps4Settings() {
+  const { ps4Draft, ps4Original, patchPs4Draft, resetPs4Defaults, openDiff, rerunSetup } = useApp();
+  const changes = useMemo(() => (ps4Original && ps4Draft ? diffPs4(ps4Original, ps4Draft) : []), [ps4Original, ps4Draft]);
+  if (!ps4Draft) return null;
+  const d = ps4Draft;
+  const blank = [d.shader_log_folder, d.command_buffer_dump_folder, d.printf_output_file, d.profiler_output_file].some((v) => !v.trim());
+  const profilerOn = d.profiler_direction === "File" || d.profiler_direction === "FileAndNetwork";
+
+  return (
+    <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit" className="flex h-full flex-col">
+      <motion.header variants={itemVariants} className="flex items-end justify-between gap-4 px-8 pb-4 pt-2">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight">Settings</h1>
+          <p className="truncate text-[13px] text-mute">PS4 emulator (Kyty). These are saved by the launcher and applied each time you start a PS4 game.</p>
+        </div>
+        <div className="flex items-center gap-2.5"><PlatformSwitch /><Button onClick={() => void rerunSetup()}>Run setup again</Button></div>
+      </motion.header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-6">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Section title="Graphics & display" className="self-start">
+            <Row label="Screen resolution"><Select value={d.screen_resolution} onChange={(v) => patchPs4Draft({ screen_resolution: v })} options={opts(PS4_RESOLUTIONS)} /></Row>
+            <Row label="Shader optimization"><Select value={d.shader_optimization_type} onChange={(v) => patchPs4Draft({ shader_optimization_type: v })} options={opts(SHADER_OPTIMIZATIONS)} /></Row>
+            <div className="mt-1 border-t border-line/70 pt-2">
+              <Toggle checked={d.neo} onChange={(v) => patchPs4Draft({ neo: v })} label="PS4 Pro mode (Neo)" hint="Emulate the PS4 Pro hardware" />
+            </div>
+          </Section>
+
+          <Section title="Debugging & logs">
+            <Toggle checked={d.vulkan_validation_enabled} onChange={(v) => patchPs4Draft({ vulkan_validation_enabled: v })} label="Vulkan validation" hint="Needs the Vulkan SDK validation layer" />
+            <Toggle checked={d.shader_validation_enabled} onChange={(v) => patchPs4Draft({ shader_validation_enabled: v })} label="Shader validation" />
+            <Toggle checked={d.command_buffer_dump_enabled} onChange={(v) => patchPs4Draft({ command_buffer_dump_enabled: v })} label="Command buffer dump" />
+            <Row label="Shader logging"><Select value={d.shader_log_direction} onChange={(v) => patchPs4Draft({ shader_log_direction: v })} options={opts(LOG_DIRECTIONS)} /></Row>
+            <Row label="Printf output"><Select value={d.printf_direction} onChange={(v) => patchPs4Draft({ printf_direction: v })} options={opts(LOG_DIRECTIONS)} /></Row>
+            <Row label="Profiler"><Select value={d.profiler_direction} onChange={(v) => patchPs4Draft({ profiler_direction: v })} options={opts(PROFILER_DIRECTIONS)} /></Row>
+          </Section>
+        </div>
+
+        <Section title="Output locations" className="mt-4">
+          <div className="grid grid-cols-1 gap-x-8 lg:grid-cols-2">
+            <Row label="Shader log folder"><TextField value={d.shader_log_folder} onChange={(v) => patchPs4Draft({ shader_log_folder: v })} disabled={d.shader_log_direction !== "File"} invalid={!d.shader_log_folder.trim()} /></Row>
+            <Row label="Command buffer folder"><TextField value={d.command_buffer_dump_folder} onChange={(v) => patchPs4Draft({ command_buffer_dump_folder: v })} disabled={!d.command_buffer_dump_enabled} invalid={!d.command_buffer_dump_folder.trim()} /></Row>
+            <Row label="Printf output file"><TextField value={d.printf_output_file} onChange={(v) => patchPs4Draft({ printf_output_file: v })} disabled={d.printf_direction !== "File"} invalid={!d.printf_output_file.trim()} /></Row>
+            <Row label="Profiler output file"><TextField value={d.profiler_output_file} onChange={(v) => patchPs4Draft({ profiler_output_file: v })} disabled={!profilerOn} invalid={!d.profiler_output_file.trim()} /></Row>
+          </div>
+        </Section>
+
+        <Section title="Game folders" className="mt-4">
+          <p className="px-2 pb-1 text-[12px] text-mute">Shared with PS5: PS4 and PS5 games are told apart automatically.</p>
+          <GameFolders />
+        </Section>
+      </div>
+
+      <motion.footer variants={itemVariants} className="relative z-10 flex shrink-0 items-center justify-between gap-4 border-t border-line bg-bg/80 px-8 py-3.5 backdrop-blur-xl">
+        <span className={`text-[13px] ${changes.length ? "text-warn" : "text-mute"}`}>
+          {changes.length ? `${changes.length} unsaved change${changes.length === 1 ? "" : "s"}` : "No unsaved changes"}
+        </span>
+        <div className="flex gap-2.5">
+          <Button onClick={resetPs4Defaults}>Reset to defaults</Button>
+          <Button variant="primary" pulse disabled={!changes.length || blank} onClick={openDiff}>Save Config</Button>
+        </div>
+      </motion.footer>
+    </motion.div>
+  );
+}
+
+function Ps5Settings() {
   const { draft, original, devices, patchDraft, resetToDefaults, openDiff, configPath, rerunSetup } = useApp();
   const changes = useMemo(() => (original && draft ? diffSettings(original, draft, { devices }) : []), [original, draft, devices]);
   if (!draft) return null;
@@ -34,7 +119,7 @@ export function SettingsView() {
           <h1 className="text-[28px] font-semibold tracking-tight">Settings</h1>
           <p className="truncate text-[13px] text-mute">Edits the emulator's own config <span className="font-mono text-[12px]">{configPath}</span></p>
         </div>
-        <Button onClick={() => void rerunSetup()}>Run setup again</Button>
+        <div className="flex items-center gap-2.5"><PlatformSwitch /><Button onClick={() => void rerunSetup()}>Run setup again</Button></div>
       </motion.header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-6">

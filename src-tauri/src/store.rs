@@ -9,6 +9,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::ps4::Ps4Settings;
+
 pub const DEFAULT_REPO: &str = "KytyPS5/KytyPS5";
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -27,10 +29,17 @@ pub struct StoreData {
     /// A user-supplied tool that unpacks .pkg files. The launcher bundles no unpacking code.
     pub converter_path: String,
     pub converter_args: String,
+    /// Original Kyty (PS4) emulator folder, the one containing `fc_script.exe`. Empty = PS4 not set up.
+    pub ps4_dir: String,
+    pub ps4_repo: String,
+    pub ps4_settings: Ps4Settings,
+    /// Which modules to load per PS4 game, keyed by game id.
+    pub ps4_elfs: HashMap<String, Vec<String>>,
     pub stats: HashMap<String, PlayStats>,
 }
 
 pub const DEFAULT_CONVERTER_ARGS: &str = "\"{pkg}\" \"{out}\"";
+pub const DEFAULT_PS4_REPO: &str = "InoriRus/Kyty";
 
 impl Default for StoreData {
     fn default() -> Self {
@@ -41,6 +50,10 @@ impl Default for StoreData {
             setup_complete: false,
             converter_path: String::new(),
             converter_args: DEFAULT_CONVERTER_ARGS.into(),
+            ps4_dir: String::new(),
+            ps4_repo: DEFAULT_PS4_REPO.into(),
+            ps4_settings: Ps4Settings::default(),
+            ps4_elfs: HashMap::new(),
             stats: HashMap::new(),
         }
     }

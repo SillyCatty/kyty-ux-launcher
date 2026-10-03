@@ -9,7 +9,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::emulator::EMULATOR_EXE;
+use crate::platform::Platform;
 
 #[derive(Serialize)]
 pub struct Install {
@@ -38,15 +38,16 @@ fn looks_like_kyty(dir: &Path) -> bool {
 }
 
 /// Default folder for a launcher-managed install.
-pub fn default_install_dir() -> PathBuf {
-    env_path("LOCALAPPDATA").unwrap_or_else(|| PathBuf::from("C:\\")).join("KytyPS5")
+pub fn default_install_dir(platform: Platform) -> PathBuf {
+    env_path("LOCALAPPDATA").unwrap_or_else(|| PathBuf::from("C:\\")).join(platform.install_folder_name())
 }
 
-pub fn find_installs(extra: &[PathBuf]) -> Vec<Install> {
+pub fn find_installs(platform: Platform, extra: &[PathBuf]) -> Vec<Install> {
+    let exe = platform.exe();
     let mut found: Vec<PathBuf> = Vec::new();
     let mut seen = HashSet::new();
     let mut check = |dir: &Path| {
-        if dir.join(EMULATOR_EXE).is_file() && seen.insert(dir.to_string_lossy().to_lowercase()) {
+        if dir.join(exe).is_file() && seen.insert(dir.to_string_lossy().to_lowercase()) {
             found.push(dir.to_path_buf());
         }
     };
@@ -54,7 +55,7 @@ pub fn find_installs(extra: &[PathBuf]) -> Vec<Install> {
     for dir in extra {
         check(dir);
     }
-    check(&default_install_dir());
+    check(&default_install_dir(platform));
 
     let home = env_path("USERPROFILE");
     let mut roots: Vec<PathBuf> = ["Downloads", "Desktop", "Documents"]
@@ -79,7 +80,7 @@ pub fn find_installs(extra: &[PathBuf]) -> Vec<Install> {
     let mut installs: Vec<Install> = found
         .into_iter()
         .map(|dir| {
-            let modified = fs::metadata(dir.join(EMULATOR_EXE))
+            let modified = fs::metadata(dir.join(exe))
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
@@ -100,13 +101,17 @@ mod tests {
         let base = std::env::temp_dir().join(format!("kyty-discover-{}", std::process::id()));
         let nested = base.join("KytyPS5-2026-10-02-abc").join("KytyPS5-2026-10-02-abc");
         fs::create_dir_all(&nested).unwrap();
-        fs::write(nested.join(EMULATOR_EXE), b"x").unwrap();
-        let unrelated = base.join("Games");
-        fs::create_dir_all(&unrelated).unwrap();
-        fs::write(unrelated.join(EMULATOR_EXE), b"x").unwrap();
+        fs::write(nested.join(Platform::Ps5.exe()), b"x").unwrap();
+        let ps4 = base.join("Kyty-v0.2.0");
+        fs::create_dir_all(&ps4).unwrap();
+        fs::write(ps4.join(Platform::Ps4.exe()), b"x").unwrap();
 
-        let found = find_installs(&[nested.clone()]);
+        let found = find_installs(Platform::Ps5, &[nested.clone(), ps4.clone()]);
         assert!(found.iter().any(|i| Path::new(&i.path) == nested));
+        assert!(!found.iter().any(|i| Path::new(&i.path) == ps4), "a PS4 folder must not be offered as PS5");
+        let found4 = find_installs(Platform::Ps4, &[nested.clone(), ps4.clone()]);
+        assert!(found4.iter().any(|i| Path::new(&i.path) == ps4));
+        assert!(!found4.iter().any(|i| Path::new(&i.path) == nested));
         let _ = fs::remove_dir_all(&base);
     }
 }

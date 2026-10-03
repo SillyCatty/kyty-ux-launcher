@@ -11,13 +11,14 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::emulator::EMULATOR_EXE;
+use crate::platform::Platform;
 
-const ASSET_SUFFIX: &str = "-windows-x64.zip";
 const MAX_UNPACKED_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// Runtime data and user files that an update must never overwrite.
-const PRESERVED: [&str; 8] =
-    ["_savedata", "_downloaddata", "_tempdata", "_shaders", "_buffers", "_patches", "kyty.ini", "_kyty.txt"];
+const PRESERVED: [&str; 10] = [
+    "_savedata", "_downloaddata", "_tempdata", "_shaders", "_buffers", "_patches", "kyty.ini", "_kyty.txt",
+    "kyty_run.lua", "_profile.prof",
+];
 
 #[derive(Deserialize)]
 struct Release {
@@ -81,10 +82,20 @@ fn trusted_download_host(url: &str) -> bool {
     })
 }
 
-/// `KytyPS5-2026-09-30-b7a1fac`: newer if the date is later; same date with a different hash counts as newer.
+/// `v0.2.0` → [0, 2, 0]; `None` for anything that isn't a plain dotted version.
+fn version_parts(tag: &str) -> Option<Vec<u64>> {
+    let parts: Option<Vec<u64>> = tag.trim().trim_start_matches(['v', 'V']).split('.').map(|p| p.parse().ok()).collect();
+    parts.filter(|p| !p.is_empty())
+}
+
+/// Dotted versions compare numerically. `KytyPS5-2026-09-30-b7a1fac`: newer if the date is later;
+/// same date with a different hash counts as newer.
 fn is_newer(current: &str, latest: &str) -> bool {
     if current == latest {
         return false;
+    }
+    if let (Some(c), Some(l)) = (version_parts(current), version_parts(latest)) {
+        return l > c;
     }
     let date = |t: &str| t.strip_prefix("KytyPS5-").filter(|r| r.len() >= 10).map(|r| r[..10].to_owned());
     match (date(current), date(latest)) {
@@ -93,7 +104,7 @@ fn is_newer(current: &str, latest: &str) -> bool {
     }
 }
 
-pub async fn check(repo: &str, current_tag: Option<String>) -> Result<UpdateInfo, String> {
+pub async fn check(platform: Platform, repo: &str, current_tag: Option<String>) -> Result<UpdateInfo, String> {
     if !valid_repo(repo) {
         return Err("The update repository must look like owner/name.".into());
     }
@@ -109,7 +120,7 @@ pub async fn check(repo: &str, current_tag: Option<String>) -> Result<UpdateInfo
     }
     let release: Release = response.json().await.map_err(|e| format!("Unexpected GitHub response: {e}"))?;
 
-    let asset = release.assets.iter().find(|a| a.name.to_lowercase().ends_with(ASSET_SUFFIX));
+    let asset = release.assets.iter().find(|a| platform.asset_matches(&a.name));
     let update_available = match &current_tag {
         Some(current) => is_newer(current, &release.tag_name),
         None => true,
@@ -184,15 +195,15 @@ fn extract(zip_path: &Path, staging: &Path) -> Result<(), String> {
 }
 
 /// The zip may or may not wrap everything in a single folder.
-fn find_payload_root(staging: &Path) -> Option<PathBuf> {
-    if staging.join(EMULATOR_EXE).is_file() {
+fn find_payload_root(staging: &Path, exe: &str) -> Option<PathBuf> {
+    if staging.join(exe).is_file() {
         return Some(staging.to_path_buf());
     }
     fs::read_dir(staging)
         .ok()?
         .filter_map(Result::ok)
         .map(|e| e.path())
-        .find(|p| p.join(EMULATOR_EXE).is_file())
+        .find(|p| p.join(exe).is_file())
 }
 
 fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
@@ -252,7 +263,8 @@ fn swap_in(payload: &Path, install: &Path, backup: &Path) -> Result<usize, Strin
     Ok(files.len())
 }
 
-pub async fn install(app: AppHandle, info: UpdateInfo, install_dir: PathBuf) -> Result<usize, String> {
+pub async fn install(app: AppHandle, platform: Platform, info: UpdateInfo, install_dir: PathBuf) -> Result<usize, String> {
+    let exe = platform.exe();
     let url = info.download_url.clone().ok_or("This release has no Windows x64 download.")?;
     let work = std::env::temp_dir().join("kyty-launcher-update");
     let _ = fs::remove_dir_all(&work);
@@ -267,8 +279,7 @@ pub async fn install(app: AppHandle, info: UpdateInfo, install_dir: PathBuf) -> 
         let staging = work_for_task.join("staging");
         fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
         extract(&zip_path, &staging)?;
-        let payload = find_payload_root(&staging)
-            .ok_or_else(|| format!("The update doesn't contain {EMULATOR_EXE}."))?;
+        let payload = find_payload_root(&staging, exe).ok_or_else(|| format!("The update doesn't contain {exe}."))?;
         swap_in(&payload, &install_dir, &work_for_task.join("backup"))
     })
     .await
@@ -289,6 +300,15 @@ mod tests {
         assert!(is_newer("KytyPS5-2026-09-30-b7a1fac", "KytyPS5-2026-10-02-1234567"));
         assert!(!is_newer("KytyPS5-2026-10-02-1234567", "KytyPS5-2026-09-30-b7a1fac"));
         assert!(is_newer("KytyPS5-2026-09-30-b7a1fac", "KytyPS5-2026-09-30-aaaaaaa"));
+    }
+
+    #[test]
+    fn dotted_versions_compare_numerically() {
+        assert!(!is_newer("v0.2.0", "v0.2.0"));
+        assert!(is_newer("v0.2.0", "v0.10.0")); // not a string comparison
+        assert!(is_newer("v0.2.0", "v0.2.1"));
+        assert!(!is_newer("v0.3.0", "v0.2.9"));
+        assert!(is_newer("v0.2.0", "nightly")); // unparseable: assume different means newer
     }
 
     #[test]

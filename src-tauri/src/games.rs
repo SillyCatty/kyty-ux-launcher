@@ -7,7 +7,11 @@ use std::{
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::settings::{normalize_dir, path_key};
+use crate::{
+    platform::Platform,
+    psf,
+    settings::{normalize_dir, path_key},
+};
 
 const MAX_PARAM_SIZE: u64 = 1024 * 1024;
 const MAX_SCAN_DEPTH: usize = 6;
@@ -15,6 +19,7 @@ const MAX_SCAN_DEPTH: usize = 6;
 #[derive(Debug, Clone, Serialize)]
 pub struct Game {
     pub id: String,
+    pub platform: Platform,
     pub name: String,
     pub title_id: String,
     pub version: String,
@@ -28,6 +33,7 @@ pub struct Game {
 }
 
 struct Metadata {
+    platform: Platform,
     name: Option<String>,
     title_id: String,
     version: String,
@@ -68,21 +74,43 @@ fn firmware_version(encoded: &str) -> String {
     version
 }
 
+/// PS4 dumps carry a binary `param.sfo`; PS5 dumps carry `param.json`.
+fn read_sfo_metadata(path: &Path) -> Metadata {
+    let map = fs::metadata(path)
+        .ok()
+        .filter(|m| m.len() <= MAX_PARAM_SIZE)
+        .and_then(|_| fs::read(path).ok())
+        .and_then(|bytes| psf::parse(&bytes));
+    let text = |key: &str| map.as_ref().and_then(|m| psf::text(m, key));
+    Metadata {
+        platform: Platform::Ps4,
+        name: text("TITLE"),
+        title_id: text("TITLE_ID").unwrap_or_default(),
+        version: text("APP_VER").unwrap_or_default(),
+        firmware: map.as_ref().and_then(psf::firmware).unwrap_or_default(),
+    }
+}
+
 fn read_metadata(game_dir: &Path) -> Metadata {
     let param = game_dir.join("sce_sys").join("param.json");
+    let sfo = game_dir.join("sce_sys").join("param.sfo");
+    if !param.is_file() && sfo.is_file() {
+        return read_sfo_metadata(&sfo);
+    }
     let root = fs::metadata(&param)
         .ok()
         .filter(|m| m.len() <= MAX_PARAM_SIZE)
         .and_then(|_| fs::read(&param).ok())
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
     let Some(root) = root else {
-        return Metadata { name: None, title_id: String::new(), version: String::new(), firmware: String::new() };
+        return Metadata { platform: Platform::Ps5, name: None, title_id: String::new(), version: String::new(), firmware: String::new() };
     };
     let mut version = json_str(&root, "appVersion");
     if version.is_empty() {
         version = json_str(&root, "contentVersion");
     }
     Metadata {
+        platform: Platform::Ps5,
         name: localized_title(&root),
         title_id: json_str(&root, "titleId"),
         version,
@@ -127,6 +155,7 @@ pub fn scan(game_dirs: &[String]) -> Vec<Game> {
                 let sce_sys = dir.join("sce_sys");
                 games.push(Game {
                     id,
+                    platform: meta.platform,
                     name: meta.name.unwrap_or_else(|| {
                         dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
                     }),
@@ -167,6 +196,41 @@ pub fn count_in(dir: &Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tells_ps4_and_ps5_games_apart() {
+        let base = std::env::temp_dir().join(format!("kyty-platforms-{}", std::process::id()));
+        let write = |rel: &str, bytes: &[u8]| {
+            let f = base.join(rel);
+            fs::create_dir_all(f.parent().unwrap()).unwrap();
+            fs::write(f, bytes).unwrap();
+        };
+        write("Five/eboot.bin", b"x");
+        write("Five/sce_sys/param.json", br#"{"titleId":"PPSA00001","appVersion":"01.000","localizedParameters":{"defaultLanguage":"en-US","en-US":{"titleName":"Five"}}}"#);
+        write("Four/eboot.bin", b"x");
+        write(
+            "Four/sce_sys/param.sfo",
+            &psf::build_for_test(&[
+                ("APP_VER", psf::PsfValue::Text("01.02".into())),
+                ("SYSTEM_VER", psf::PsfValue::Int(0x0505_0000)),
+                ("TITLE", psf::PsfValue::Text("Four Game".into())),
+                ("TITLE_ID", psf::PsfValue::Text("CUSA00004".into())),
+            ]),
+        );
+        write("Mystery/eboot.bin", b"x"); // no metadata: assumed PS5, like before
+        write("Broken/eboot.bin", b"x");
+        write("Broken/sce_sys/param.sfo", b"garbage"); // unreadable sfo still means PS4
+
+        let games = scan(&[base.to_string_lossy().into_owned()]);
+        let by = |name: &str| games.iter().find(|g| g.name == name).unwrap_or_else(|| panic!("missing {name}"));
+        assert_eq!(by("Five").platform, Platform::Ps5);
+        assert_eq!(by("Five").title_id, "PPSA00001");
+        let four = by("Four Game");
+        assert_eq!((four.platform, four.title_id.as_str(), four.version.as_str(), four.firmware.as_str()), (Platform::Ps4, "CUSA00004", "01.02", "5.05"));
+        assert_eq!(by("Mystery").platform, Platform::Ps5);
+        assert_eq!(by("Broken").platform, Platform::Ps4);
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn counts_games_inside_an_output_folder() {
